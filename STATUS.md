@@ -1,7 +1,19 @@
 # STATUS
 
-**Version:** v0.1
+**Version:** v0.2
 **Last update:** 2026-05-21
+
+## What landed in v0.2 (on top of v0.1)
+
+- `FlatIndex.searchBatch(alloc, queries, k, n_threads)` — multi-threaded
+  batch search via std.Thread. Each worker thread processes a
+  contiguous chunk of queries through the single-thread search path
+  with no shared mutable state during distance computation.
+- `bench/bench_multithread.zig` — scaling measurement at T ∈ {1,2,4,8}
+- Measured ~2.98x scaling at T=4 on 4-core/8-thread Ryzen consumer CPU
+- Gap to faiss-cpu closed from ~4.5x (v0.1 single-thread) to ~1.5x
+  (v0.2 4-thread)
+- T=1 falls through to single-thread to avoid spawn overhead
 
 ## What landed in v0.1 (on top of v0.0.1)
 

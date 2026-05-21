@@ -150,6 +150,84 @@ pub const FlatIndex = struct {
         @memcpy(out, all_hits[0..effective_k]);
         return out;
     }
+
+    /// Multi-threaded batched kNN search. Spawns `n_threads` worker
+    /// threads (clamped to queries.len) and distributes the queries
+    /// in contiguous chunks. Each thread runs the single-query search
+    /// path independently — no shared mutable state during the
+    /// distance computation.
+    ///
+    /// Returns out[i] = top-k hits for queries[i]; caller frees each
+    /// inner slice + the outer slice.
+    ///
+    /// On any error in a worker thread, the worker panics. The
+    /// alloc-fallible variant is the single-thread search() above.
+    /// This batch path is bench-grade.
+    pub fn searchBatch(
+        self: *const FlatIndex,
+        alloc: std.mem.Allocator,
+        queries: []const []const f32,
+        k: usize,
+        n_threads: usize,
+    ) ![][]Hit {
+        const out = try alloc.alloc([]Hit, queries.len);
+        errdefer alloc.free(out);
+
+        const T = @min(@max(n_threads, 1), queries.len);
+        if (T == 0) return out;
+        if (T == 1) {
+            // Fall through to single-thread to avoid spawn overhead.
+            for (queries, 0..) |q, i| {
+                out[i] = try self.search(alloc, q, k);
+            }
+            return out;
+        }
+
+        var threads = try alloc.alloc(std.Thread, T);
+        defer alloc.free(threads);
+
+        const WorkerArgs = struct {
+            self: *const FlatIndex,
+            alloc: std.mem.Allocator,
+            queries: []const []const f32,
+            k: usize,
+            out: [][]Hit,
+            start: usize,
+            end: usize,
+        };
+        const args = try alloc.alloc(WorkerArgs, T);
+        defer alloc.free(args);
+
+        const chunk = (queries.len + T - 1) / T;
+        var t: usize = 0;
+        while (t < T) : (t += 1) {
+            const start = t * chunk;
+            const end = @min(start + chunk, queries.len);
+            args[t] = .{
+                .self = self,
+                .alloc = alloc,
+                .queries = queries,
+                .k = k,
+                .out = out,
+                .start = start,
+                .end = end,
+            };
+            threads[t] = try std.Thread.spawn(.{}, struct {
+                fn run(a: *WorkerArgs) void {
+                    var i = a.start;
+                    while (i < a.end) : (i += 1) {
+                        a.out[i] = a.self.search(a.alloc, a.queries[i], a.k) catch |err| {
+                            std.debug.panic("faiss-zig searchBatch worker failed: {}", .{err});
+                        };
+                    }
+                }
+            }.run, .{&args[t]});
+        }
+
+        t = 0;
+        while (t < T) : (t += 1) threads[t].join();
+        return out;
+    }
 };
 
 // ============================================================================
