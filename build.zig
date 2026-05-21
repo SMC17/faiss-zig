@@ -49,4 +49,20 @@ pub fn build(b: *std.Build) void {
     run_bench.has_side_effects = true;
     const bench_step = b.step("bench", "Flat-index kNN throughput bench");
     bench_step.dependOn(&run_bench.step);
+
+    // SIMD vs scalar speedup measurement.
+    const bench_simd_mod = b.createModule(.{
+        .root_source_file = b.path("bench/bench_simd_vs_scalar.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    bench_simd_mod.addImport("faiss", mod);
+    const bench_simd_exe = b.addExecutable(.{
+        .name = "bench-simd",
+        .root_module = bench_simd_mod,
+    });
+    const run_bench_simd = b.addRunArtifact(bench_simd_exe);
+    run_bench_simd.has_side_effects = true;
+    const bench_simd_step = b.step("bench-simd", "SIMD vs scalar speedup bench");
+    bench_simd_step.dependOn(&run_bench_simd.step);
 }
