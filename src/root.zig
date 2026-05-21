@@ -153,13 +153,29 @@ pub const FlatIndex = struct {
 };
 
 // ============================================================================
-// Distance / similarity primitives
+// Distance / similarity primitives — SIMD where dimension fits a clean
+// multiple of the lane width, scalar tail otherwise.
+//
+// We use @Vector(8, f32) as the canonical lane width: matches 256-bit
+// AVX2 on x86_64, NEON 128-bit + unroll on aarch64, and lowers to
+// scalar on architectures without 256-bit SIMD. The compiler chooses
+// the lowering; we don't intrinsic-hardcode anything.
 // ============================================================================
 
+const Vec8 = @Vector(8, f32);
+const LANE = 8;
+
 fn l2SquaredDistance(a: []const f32, b: []const f32) f32 {
-    // Caller guarantees a.len == b.len via Index dimension check.
-    var sum: f32 = 0.0;
+    var sum_vec: Vec8 = @splat(0.0);
     var i: usize = 0;
+    const tail = a.len - (a.len % LANE);
+    while (i < tail) : (i += LANE) {
+        const av: Vec8 = a[i..][0..LANE].*;
+        const bv: Vec8 = b[i..][0..LANE].*;
+        const d = av - bv;
+        sum_vec += d * d;
+    }
+    var sum: f32 = @reduce(.Add, sum_vec);
     while (i < a.len) : (i += 1) {
         const d = a[i] - b[i];
         sum += d * d;
@@ -168,8 +184,15 @@ fn l2SquaredDistance(a: []const f32, b: []const f32) f32 {
 }
 
 fn innerProduct(a: []const f32, b: []const f32) f32 {
-    var sum: f32 = 0.0;
+    var sum_vec: Vec8 = @splat(0.0);
     var i: usize = 0;
+    const tail = a.len - (a.len % LANE);
+    while (i < tail) : (i += LANE) {
+        const av: Vec8 = a[i..][0..LANE].*;
+        const bv: Vec8 = b[i..][0..LANE].*;
+        sum_vec += av * bv;
+    }
+    var sum: f32 = @reduce(.Add, sum_vec);
     while (i < a.len) : (i += 1) {
         sum += a[i] * b[i];
     }
@@ -177,13 +200,60 @@ fn innerProduct(a: []const f32, b: []const f32) f32 {
 }
 
 fn vectorNorm(v: []const f32) f32 {
-    var sum: f32 = 0.0;
+    var sum_vec: Vec8 = @splat(0.0);
     var i: usize = 0;
+    const tail = v.len - (v.len % LANE);
+    while (i < tail) : (i += LANE) {
+        const vv: Vec8 = v[i..][0..LANE].*;
+        sum_vec += vv * vv;
+    }
+    var sum: f32 = @reduce(.Add, sum_vec);
     while (i < v.len) : (i += 1) {
         sum += v[i] * v[i];
     }
     return @sqrt(sum);
 }
+
+/// Public SIMD-path distance functions for benches + external callers
+/// that want to compute distances without going through the Index
+/// wrapper.
+pub const distance = struct {
+    pub const l2SquaredDistance = @import("root.zig").l2SquaredDistance;
+    pub const innerProduct = @import("root.zig").innerProduct;
+    pub const vectorNorm = @import("root.zig").vectorNorm;
+};
+
+/// Scalar reference implementations — kept for testing the SIMD path
+/// against. Public so callers + benches can compare.
+pub const scalar = struct {
+    pub fn l2SquaredDistance(a: []const f32, b: []const f32) f32 {
+        var sum: f32 = 0.0;
+        var i: usize = 0;
+        while (i < a.len) : (i += 1) {
+            const d = a[i] - b[i];
+            sum += d * d;
+        }
+        return sum;
+    }
+
+    pub fn innerProduct(a: []const f32, b: []const f32) f32 {
+        var sum: f32 = 0.0;
+        var i: usize = 0;
+        while (i < a.len) : (i += 1) {
+            sum += a[i] * b[i];
+        }
+        return sum;
+    }
+
+    pub fn vectorNorm(v: []const f32) f32 {
+        var sum: f32 = 0.0;
+        var i: usize = 0;
+        while (i < v.len) : (i += 1) {
+            sum += v[i] * v[i];
+        }
+        return @sqrt(sum);
+    }
+};
 
 fn hitLessL2(_: void, x: Hit, y: Hit) bool {
     return x.score < y.score;
@@ -362,4 +432,48 @@ test "distance primitives — innerProduct" {
 test "distance primitives — vectorNorm" {
     const a = [_]f32{ 3, 4 };
     try testing.expectApproxEqAbs(@as(f32, 5.0), vectorNorm(&a), 1e-6);
+}
+
+test "SIMD agrees with scalar — l2_squared on aligned + tail lengths" {
+    var prng: std.Random.DefaultPrng = .init(7);
+    const rng = prng.random();
+    inline for ([_]usize{ 8, 16, 64, 100, 128, 129, 256, 1024, 1025 }) |D| {
+        var a: [1025]f32 = undefined;
+        var b: [1025]f32 = undefined;
+        for (a[0..D]) |*x| x.* = rng.float(f32) * 100.0;
+        for (b[0..D]) |*x| x.* = rng.float(f32) * 100.0;
+        const simd = l2SquaredDistance(a[0..D], b[0..D]);
+        const scal = scalar.l2SquaredDistance(a[0..D], b[0..D]);
+        // SIMD reduction order differs; tolerate small relative error.
+        const rel = @abs(simd - scal) / @max(@abs(scal), 1e-6);
+        try testing.expect(rel < 1e-4);
+    }
+}
+
+test "SIMD agrees with scalar — innerProduct on aligned + tail lengths" {
+    var prng: std.Random.DefaultPrng = .init(11);
+    const rng = prng.random();
+    inline for ([_]usize{ 8, 16, 64, 100, 128, 129, 256, 1024, 1025 }) |D| {
+        var a: [1025]f32 = undefined;
+        var b: [1025]f32 = undefined;
+        for (a[0..D]) |*x| x.* = rng.float(f32);
+        for (b[0..D]) |*x| x.* = rng.float(f32);
+        const simd = innerProduct(a[0..D], b[0..D]);
+        const scal = scalar.innerProduct(a[0..D], b[0..D]);
+        const rel = @abs(simd - scal) / @max(@abs(scal), 1e-6);
+        try testing.expect(rel < 1e-4);
+    }
+}
+
+test "SIMD agrees with scalar — vectorNorm on aligned + tail lengths" {
+    var prng: std.Random.DefaultPrng = .init(13);
+    const rng = prng.random();
+    inline for ([_]usize{ 8, 16, 64, 100, 128, 129, 256, 1024, 1025 }) |D| {
+        var v: [1025]f32 = undefined;
+        for (v[0..D]) |*x| x.* = rng.float(f32);
+        const simd = vectorNorm(v[0..D]);
+        const scal = scalar.vectorNorm(v[0..D]);
+        const rel = @abs(simd - scal) / @max(@abs(scal), 1e-6);
+        try testing.expect(rel < 1e-4);
+    }
 }

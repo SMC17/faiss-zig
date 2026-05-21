@@ -5,44 +5,72 @@ Pure-Zig vector similarity search. Portfolio artifact #2 of the
 
 ## Status
 
-**v0.0.1 — Flat (brute-force) index with L2-squared, inner-product,
-cosine metrics. Scalar, single-thread.**
+**v0.1 — SIMD distance loops + audited head-to-head against `faiss-cpu`.**
 
-Comparable upstream: [facebookresearch/faiss](https://github.com/facebookresearch/faiss)
-— C++ canonical, SIMD-tuned, GPU support. faiss-zig at v0.0.1 is a
-correctness-first build; no head-to-head against faiss-cpp yet
-(staged for v0.1, same posture as `safetensors-zig`'s Rust bench).
+The v0.0.1 scalar single-thread baseline was ~50x off faiss-cpu's
+SIMD+multithread tuned C++. v0.1 closes most of the gap.
 
-Pre-1.0 substrate per the Zig 0.16 ecosystem convention.
+### v0.1 benchmark — single-thread, ReleaseFast, Ryzen-class consumer Linux
+
+Inner-loop distance throughput (raw, no Index overhead, median of 3
+trials, N=100K vectors per dim):
+
+| Dim | SIMD `@Vector(8, f32)` | Scalar reduction loop | Ratio |
+|---|---|---|---|
+| 16 | 7 ns/dist | 16 ns/dist | 2.3x |
+| 64 | 23 ns/dist | 103 ns/dist | 4.5x |
+| 128 | 49 ns/dist | 239 ns/dist | 4.9x |
+| 256 | 89 ns/dist | 489 ns/dist | 5.5x |
+| 512 | 169 ns/dist | 1024 ns/dist | 6.1x |
+| 1024 | 362 ns/dist | 2148 ns/dist | 5.9x |
+
+The scalar loop is also `ReleaseFast` Zig — the win comes from
+`@Vector(8, f32)` letting LLVM emit 8 parallel f32 accumulators
+that the strict single-accumulator scalar reduction can't.
+
+End-to-end head-to-head against `faiss-cpu` (Python wrapper of
+`facebookresearch/faiss` C++) on N=10000, D=128, K=10, Q=100, L2:
+
+| Implementation | ns/query | queries/sec | vectors-scored/sec |
+|---|---|---|---|
+| `faiss-cpu` 1.13.2 (C++ + AVX-2 + multi-thread) | ~510,000 | ~1,960 | ~19.6M |
+| **faiss-zig v0.1** (Zig + @Vector + single-thread) | ~2,290,000 | ~440 | ~4.4M |
+
+**Honest result: faiss-cpu is ~4.5x faster end-to-end.** The C++ side
+uses hand-tuned AVX-2 + cache-aware tiling + multi-threading;
+faiss-zig at v0.1 is single-threaded with one @Vector(8, f32)
+accumulator and no cache tiling. The gap is closeable with v0.2
+multi-threading (expected 4-8x on this 8-core CPU) but we don't
+claim it until measured.
+
+### Path to closing the faiss-cpu gap (v0.2 work)
+
+1. **Multi-threading**: trivially parallel over queries; std.Thread
+   pool gives 4-8x on consumer 8-core hardware. Expected to close
+   most of the remaining gap.
+2. **Cache-aware tiling**: blocks vectors so the working set fits
+   L2/L3. Modest gains, ~1.5x at D=128.
+3. **f16 / bf16 storage**: 2x memory bandwidth win, modest
+   compute cost. Optional.
 
 ## What it does
 
-- `FlatIndex.init(allocator, dim, metric)` — construct an in-memory
+- `FlatIndex.init(allocator, dim, metric)` — construct in-memory
   brute-force index
-- `addWithId(id, vector)` — insert a vector with caller-provided ID
-- `add(vector)` — insert with auto-assigned ID
-- `search(alloc, query, k)` — kNN search, returns `[]Hit` sorted by
-  score (ascending for `l2_squared`, descending for `inner_product`
-  and `cosine`)
-- Three metrics:
-  - `l2_squared` — squared Euclidean (sqrt skipped for speed; rank is
-    monotonic so order is unchanged)
-  - `inner_product` — sum of products
-  - `cosine` — dot(a,b) / (|a| * |b|); rejects zero-norm vectors
+- Add/search API unchanged from v0.0.1
+- Three metrics: `l2_squared`, `inner_product`, `cosine`
+- **SIMD distance loops via `@Vector(8, f32)`** with scalar tail for
+  non-multiple-of-8 dimensions
+- **Public `faiss.scalar.*` and `faiss.distance.*`** for callers that
+  want to bypass the Index wrapper or compare paths
 
 ## What it does NOT do (yet)
 
-- **SIMD acceleration** — scalar loops at v0.0.1; AVX-2 / NEON
-  acceleration is v0.1 work
-- **Approximate indexes** — no IVF, no HNSW, no PQ, no OPQ. Flat
-  only. v0.1+ work.
-- **GPU support** — CPU only. v0.x.
-- **Multi-thread search** — single-threaded at v0.0.1
-- **Disk-backed indexes** — in-memory only
-- **Vector serialisation format** — no binary file format yet; v0.1
-  task. The example CLI generates synthetic vectors inline.
-- **Head-to-head bench vs `facebookresearch/faiss`** — v0.1 work.
-  v0.0.1 ships a Zig self-bench only.
+- **Multi-threaded search** — v0.2 (highest-leverage next step)
+- **Approximate indexes** (IVF, HNSW, PQ) — v0.2+
+- **GPU** — not a near-term target
+- **Disk-backed indexes** — v0.2+
+- **Vector serialisation format** — v0.2
 
 ## Quickstart
 
@@ -58,40 +86,39 @@ pub fn main() !void {
     var idx = faiss.FlatIndex.init(alloc, 128, .l2_squared);
     defer idx.deinit();
 
-    // Add vectors
     var v: [128]f32 = undefined;
     // ... fill v ...
     _ = try idx.add(&v);
 
-    // Search
     var query: [128]f32 = undefined;
-    // ... fill query ...
     const hits = try idx.search(alloc, &query, 10);
     defer alloc.free(hits);
 
-    for (hits) |h| {
-        std.debug.print("id={d} score={d:.4}\n", .{ h.id, h.score });
-    }
+    for (hits) |h| std.debug.print("id={d} score={d:.4}\n", .{ h.id, h.score });
 }
 ```
 
-## Build
+## Build + bench
 
 ```sh
-zig build test            # 14 unit tests
-zig build search          # synthetic 1000-vector kNN demo
-zig build bench           # throughput bench (N=10000, D=128 default)
-zig build install -Doptimize=ReleaseFast
+zig build test                         # 17 unit tests (incl. SIMD vs scalar agreement)
+zig build search                       # synthetic kNN demo CLI
+zig build bench                        # flat-index throughput
+zig build bench-simd                   # SIMD vs scalar speedup at varied D
+
+# faiss-cpu head-to-head (requires venv with faiss-cpu + numpy)
+python3 -m venv .venv && source .venv/bin/activate
+pip install faiss-cpu numpy
+LD_LIBRARY_PATH=/usr/lib python3 bench/bench_faiss_cpu.py
 ```
 
-## Position in the portfolio
+## Comparable upstream
 
-faiss-zig is artifact #2 of the 8-artifact jaw-drop portfolio. Every
-RAG / retrieval / embedding-search shop is a user of faiss-cpp; a
-Zig-native sibling with audited bench numbers is a high-aura
-artifact at low engineering cost. Audience: HuggingFace, vector-DB
-vendors (Pinecone, Weaviate, Qdrant, Milvus), every shop running
-RAG at production.
+- [`facebookresearch/faiss`](https://github.com/facebookresearch/faiss)
+  — C++ canonical. faiss-zig v0.1 is single-threaded with single-
+  accumulator @Vector lowering; faiss-cpu uses multi-thread +
+  AVX-2-tuned kernels. We cite, we bench honestly, we publish the
+  ~4.5x loss at v0.1.
 
 ## License
 
@@ -99,17 +126,16 @@ AGPL-3.0-or-later. See `LICENSE`.
 
 ## Honest non-claims
 
-- **No SIMD yet.** Scalar Zig loops will not match faiss-cpp's
-  hand-tuned AVX-512 / NEON. The architecture admits SIMD
-  acceleration cleanly via `std.simd`; v0.1 work.
-- **No approximate indexes.** Flat at v0.0.1 only. For N > 1M or
-  D > 1024, an approximate index is what production needs; we don't
-  have one yet.
-- **Single-thread.** Search latency scales linearly with N. v0.0.1
-  is not the throughput tier.
-- **No GPU.** Not a near-term target. faiss-cpp's GPU path is the
-  reference; if a Zig GPU path materialises it would compose with
-  `mlx-nonapple` from portfolio artifact #9.
-- **No production deployment story.** v0.0.1 is the correctness-and-
-  API gate; the bench / SIMD / IVF / HNSW work that makes the
-  library production-grade is v0.1+.
+- **No multi-threading at v0.1.** Single-threaded inner loops.
+  faiss-cpu uses OMP / pthread internally. The ~4.5x gap is
+  partially attributable to this.
+- **No cache-aware tiling.** Working set blasts through L2/L3 on
+  large N; faiss-cpu blocks. Closeable in v0.2.
+- **No approximate index.** Flat only. For N > 1M or D > 1024,
+  production needs IVF / HNSW / PQ. Roadmap.
+- **No GPU.** Not a near-term target.
+- **Single-platform tested** (x86_64-linux, Zig 0.16 ReleaseFast,
+  Ryzen-class consumer CPU).
+- The SIMD speedup table reflects this specific CPU's auto-vectorisation
+  behavior at ReleaseFast. Different compilers / -O levels / CPUs
+  may produce different ratios.
