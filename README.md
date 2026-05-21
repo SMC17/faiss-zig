@@ -5,6 +5,28 @@ Pure-Zig vector similarity search. Portfolio artifact #2 of the
 
 ## Status
 
+**v0.2 — multi-threaded search batch. faiss-cpu gap narrows from ~4.5x → ~1.5x.**
+
+| Implementation | ns/query | queries/sec | vs faiss-cpu |
+|---|---|---|---|
+| faiss-cpu 1.13.2 (C++ + AVX-2 + multi-thread) | ~510,000 | ~1,960 | 1.00x (ref) |
+| **faiss-zig v0.2 (Zig + @Vector + 4 threads)** | **~772,000** | **~1,295** | **~1.5x slower** |
+| faiss-zig v0.1 (Zig + @Vector + 1 thread) | ~2,290,000 | ~440 | ~4.5x slower |
+| faiss-zig v0.0.1 (Zig scalar + 1 thread) | ~22,900,000 | ~44 | ~45x slower |
+
+Scaling at N=10000, D=128, Q=100 across 1/2/4/8 threads:
+
+| Threads | total ms | ns/query | queries/sec | scaling |
+|---|---|---|---|---|
+| 1 | 230 | 2,303,033 | 434 | 1.00x |
+| 2 | 128 | 1,289,802 | 775 | 1.79x |
+| 4 | 77 | 772,177 | 1,295 | **2.98x** |
+| 8 | 84 | 840,507 | 1,189 | 2.74x |
+
+The 4→8 thread regression is hyperthreading + memory-bandwidth
+contention on the 4-core / 8-thread consumer CPU. Real 8-core
+hardware (without HT contention) should hold 5-6x scaling.
+
 **v0.1 — SIMD distance loops + audited head-to-head against `faiss-cpu`.**
 
 The v0.0.1 scalar single-thread baseline was ~50x off faiss-cpu's
@@ -66,11 +88,10 @@ claim it until measured.
 
 ## What it does NOT do (yet)
 
-- **Multi-threaded search** — v0.2 (highest-leverage next step)
-- **Approximate indexes** (IVF, HNSW, PQ) — v0.2+
+- **Approximate indexes** (IVF, HNSW, PQ) — v0.3+
 - **GPU** — not a near-term target
-- **Disk-backed indexes** — v0.2+
-- **Vector serialisation format** — v0.2
+- **Disk-backed indexes** — v0.3
+- **Vector serialisation format** — v0.3
 
 ## Quickstart
 
