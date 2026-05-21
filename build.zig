@@ -65,4 +65,20 @@ pub fn build(b: *std.Build) void {
     run_bench_simd.has_side_effects = true;
     const bench_simd_step = b.step("bench-simd", "SIMD vs scalar speedup bench");
     bench_simd_step.dependOn(&run_bench_simd.step);
+
+    // Multi-thread scaling bench.
+    const bench_mt_mod = b.createModule(.{
+        .root_source_file = b.path("bench/bench_multithread.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    bench_mt_mod.addImport("faiss", mod);
+    const bench_mt_exe = b.addExecutable(.{
+        .name = "bench-multithread",
+        .root_module = bench_mt_mod,
+    });
+    const run_bench_mt = b.addRunArtifact(bench_mt_exe);
+    run_bench_mt.has_side_effects = true;
+    const bench_mt_step = b.step("bench-multithread", "Thread-scaling bench");
+    bench_mt_step.dependOn(&run_bench_mt.step);
 }
