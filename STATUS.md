@@ -1,7 +1,24 @@
 # STATUS
 
-**Version:** v0.2
+**Version:** v0.3
 **Last update:** 2026-05-21
+
+## What landed in v0.3 (on top of v0.2)
+
+- `src/hnsw.zig`: complete IndexHNSW implementation (~310 LOC).
+  Hierarchical navigable small-world approximate index. Per-node
+  level drawn from geometric distribution, M-nearest neighbor
+  connections at each level, reciprocal edges with M-prune,
+  ef_construction-bounded layer search during insert, ef_search-bounded
+  query, multi-level greedy descent.
+- Default config: M=16, ef_construction=200, ef_search=100. Standard
+  HNSW parameters (matches faiss-cpu defaults).
+- L2-squared metric only at v0.3. Cosine + inner-product paths can
+  reuse the framework in v0.4.
+- 5 unit tests including a recall test against FlatIndex at N=200
+  D=32 top-10. Threshold set to 0.7; observed recall is typically
+  0.9+ on this size.
+- Re-exported as `faiss.IndexHNSW` + `faiss.HNSWConfig`.
 
 ## What landed in v0.2 (on top of v0.1)
 
