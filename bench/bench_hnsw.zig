@@ -4,12 +4,14 @@
 const std = @import("std");
 const faiss = @import("faiss");
 
-// HONEST NON-CLAIM: bench currently SEGVs at N > ~250 with the v0.3
-// HNSW implementation. Root cause under investigation (likely stale-
-// pointer issue from outer ArrayList grow invalidating cached &elem
-// pointers). v0.5 blocker; tracked in STATUS.md.
-const N: usize = 200;
-const D: u32 = 32;
+// v0.5: HNSW SEGV at N > ~200 fixed. Root cause was OOB access at
+// self.connections.items[c.id].items[level] when c.id's max-level <
+// the searchLayer level. Fix: skip nodes that don't exist at the
+// queried level in greedyDescend + searchLayer, and filter search
+// results to only admit nodes valid at the level (so callers can
+// safely write the reciprocal edge).
+const N: usize = 10_000;
+const D: u32 = 128;
 const K: usize = 10;
 const Q: usize = 100;
 

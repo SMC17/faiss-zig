@@ -130,9 +130,15 @@ pub const IndexHNSW = struct {
     /// ml = 1/ln(M). Higher levels are exponentially rarer.
     fn randomLevel(self: *IndexHNSW) u8 {
         const ml: f64 = 1.0 / std.math.log(f64, std.math.e, @floatFromInt(self.config.M));
-        const u: f64 = self.rng_state.random().float(f64);
-        const lvl: f64 = -std.math.log(f64, std.math.e, u) * ml;
-        const capped: f64 = @min(lvl, 32.0);
+        // Guard against u==0 which would give -log(0) = +inf, then
+        // -inf * ml = -inf or NaN, and @intFromFloat on NaN/Inf is UB
+        // (this is the root cause of the v0.4 production-N SEGV).
+        const u_raw: f64 = self.rng_state.random().float(f64);
+        const u: f64 = if (u_raw <= 0.0 or !std.math.isFinite(u_raw)) 0.5 else u_raw;
+        const lvl_raw: f64 = -std.math.log(f64, std.math.e, u) * ml;
+        // Clamp explicitly to [0, 32] before float→int cast.
+        if (!std.math.isFinite(lvl_raw) or lvl_raw < 0.0) return 0;
+        const capped: f64 = @min(lvl_raw, 32.0);
         return @intFromFloat(capped);
     }
 
@@ -218,7 +224,14 @@ pub const IndexHNSW = struct {
         var changed = true;
         while (changed) {
             changed = false;
-            for (self.connections.items[cur_node].items[level].items) |n| {
+            const cur_conns = self.connections.items[cur_node];
+            // Skip if this node doesn't exist at this level (its max
+            // level is below `level`). Can happen when a previous
+            // iteration moved cur_node to a candidate whose level is
+            // <= the previous search level but < the next iteration's
+            // level.
+            if (level >= cur_conns.items.len) break;
+            for (cur_conns.items[level].items) |n| {
                 const d = l2sq(self.vectorAt(n), query);
                 if (d < cur_dist) {
                     cur_dist = d;
@@ -250,7 +263,13 @@ pub const IndexHNSW = struct {
         for (entry_points) |ep| {
             const d = l2sq(self.vectorAt(ep), query);
             try candidates.push(self.allocator, .{ .dist = d, .id = ep });
-            try results.push(self.allocator, .{ .dist = d, .id = ep });
+            // Only count toward results if this node exists at this level
+            // (max-level >= search level). Otherwise we'd return it as a
+            // neighbor candidate and the caller would access its
+            // out-of-bounds connections[level].
+            if (level < self.connections.items[ep].items.len) {
+                try results.push(self.allocator, .{ .dist = d, .id = ep });
+            }
             try visited.put(ep, {});
         }
 
@@ -258,14 +277,21 @@ pub const IndexHNSW = struct {
             const worst_result = results.peek() orelse break;
             if (c.dist > worst_result.dist and results.count() >= ef) break;
 
-            for (self.connections.items[c.id].items[level].items) |n| {
+            // Skip nodes that don't exist at this level
+            const c_conns = self.connections.items[c.id];
+            if (level >= c_conns.items.len) continue;
+            for (c_conns.items[level].items) |n| {
                 if (visited.contains(n)) continue;
                 try visited.put(n, {});
                 const d = l2sq(self.vectorAt(n), query);
                 if (results.count() < ef or d < results.peek().?.dist) {
                     try candidates.push(self.allocator, .{ .dist = d, .id = n });
-                    try results.push(self.allocator, .{ .dist = d, .id = n });
-                    if (results.count() > ef) _ = results.pop();
+                    // Only admit to results if n has the level — otherwise
+                    // the caller can't safely use it as a neighbor.
+                    if (level < self.connections.items[n].items.len) {
+                        try results.push(self.allocator, .{ .dist = d, .id = n });
+                        if (results.count() > ef) _ = results.pop();
+                    }
                 }
             }
         }
