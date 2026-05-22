@@ -235,6 +235,11 @@ pub const hnsw = @import("hnsw.zig");
 pub const IndexHNSW = hnsw.IndexHNSW;
 pub const HNSWConfig = hnsw.Config;
 
+// Re-export IVFFlat
+pub const ivf = @import("ivf.zig");
+pub const IndexIVFFlat = ivf.IndexIVFFlat;
+pub const IVFConfig = ivf.IVFConfig;
+
 // ============================================================================
 // Distance / similarity primitives — SIMD where dimension fits a clean
 // multiple of the lane width, scalar tail otherwise.
@@ -351,6 +356,15 @@ fn hitMoreIP(_: void, x: Hit, y: Hit) bool {
 // ============================================================================
 
 const testing = std.testing;
+
+// Force test discovery into transitively-imported modules (Zig 0.16
+// only auto-collects from the test root and direct `pub const`
+// re-exports won't pull in tests under those declarations unless
+// referenced from a test block).
+test {
+    _ = hnsw;
+    _ = ivf;
+}
 
 test "FlatIndex.l2 — empty index returns EmptyIndex" {
     var idx = FlatIndex.init(testing.allocator, 3, .l2_squared);
