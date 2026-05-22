@@ -81,4 +81,20 @@ pub fn build(b: *std.Build) void {
     run_bench_mt.has_side_effects = true;
     const bench_mt_step = b.step("bench-multithread", "Thread-scaling bench");
     bench_mt_step.dependOn(&run_bench_mt.step);
+
+    // HNSW bench
+    const bench_hnsw_mod = b.createModule(.{
+        .root_source_file = b.path("bench/bench_hnsw.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    bench_hnsw_mod.addImport("faiss", mod);
+    const bench_hnsw_exe = b.addExecutable(.{
+        .name = "bench-hnsw",
+        .root_module = bench_hnsw_mod,
+    });
+    const run_bench_hnsw = b.addRunArtifact(bench_hnsw_exe);
+    run_bench_hnsw.has_side_effects = true;
+    const bench_hnsw_step = b.step("bench-hnsw", "HNSW bench at N=10000 D=128");
+    bench_hnsw_step.dependOn(&run_bench_hnsw.step);
 }
