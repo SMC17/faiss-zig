@@ -1,7 +1,7 @@
 # faiss-zig
 
 Pure-Zig vector similarity search. Portfolio artifact #2 of the
-8-artifact jaw-drop portfolio (see `~/portfolio/README.md`).
+8-artifact jaw-drop portfolio (see `the broader sovereign-stack portfolio`).
 
 ## Status
 
@@ -88,7 +88,7 @@ claim it until measured.
 
 ## What it does NOT do (yet)
 
-- **Approximate indexes** (IVF, HNSW, PQ) — v0.3+
+- **IVF + PQ approximate indexes** — v0.6+ (HNSW shipped at v0.5)
 - **GPU** — not a near-term target
 - **Disk-backed indexes** — v0.3
 - **Vector serialisation format** — v0.3
