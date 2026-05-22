@@ -82,7 +82,7 @@ pub fn build(b: *std.Build) void {
     const bench_mt_step = b.step("bench-multithread", "Thread-scaling bench");
     bench_mt_step.dependOn(&run_bench_mt.step);
 
-    // HNSW bench
+    // HNSW bench. ReleaseFast for production timing.
     const bench_hnsw_mod = b.createModule(.{
         .root_source_file = b.path("bench/bench_hnsw.zig"),
         .target = target,
