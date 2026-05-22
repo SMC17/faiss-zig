@@ -230,6 +230,11 @@ pub const FlatIndex = struct {
     }
 };
 
+// Re-export HNSW
+pub const hnsw = @import("hnsw.zig");
+pub const IndexHNSW = hnsw.IndexHNSW;
+pub const HNSWConfig = hnsw.Config;
+
 // ============================================================================
 // Distance / similarity primitives — SIMD where dimension fits a clean
 // multiple of the lane width, scalar tail otherwise.

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0 — 2026-05-21
+
+IndexHNSW: hierarchical navigable small-world approximate index.
+
+- `src/hnsw.zig` (~310 LOC): full HNSW with insert + search, level
+  assignment from geometric distribution, M-nearest neighbor connections
+  with reciprocal pruning, ef_construction-bounded layer search,
+  ef_search-bounded query, multi-level greedy descent.
+- L2-squared metric only at v0.3 (other metrics in v0.4).
+- Default config: M=16, ef_construction=200, ef_search=100, seed=42.
+- 5 unit tests including recall-vs-FlatIndex on N=200 D=32 top-10
+  (recall threshold 0.7 — typically observed at ~0.9-1.0).
+- Re-exported as `faiss.IndexHNSW` + `faiss.HNSWConfig`.
+
+Approximate-index path unblocks production-scale-out (N >> 10K, where
+FlatIndex's O(N*D) per-query cost dominates). HNSW search complexity is
+roughly O(M * ef_search * log N) so query latency at large N is
+dramatically lower than Flat — concrete head-to-head bench is v0.4.
+
 ## 0.2.0 — 2026-05-21
 
 Multi-threaded `searchBatch`. Closes most of the remaining gap to
