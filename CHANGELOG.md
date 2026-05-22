@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.6.0 — 2026-05-22
+
+IndexIVFFlat: inverted-file approximate index. Second approximate index
+after HNSW; together with FlatIndex this gives faiss-zig the
+Flat + HNSW + IVFFlat trio.
+
+- `src/ivf.zig` (~430 LOC): full IVFFlat with Lloyd k-means training,
+  inverted-list build + add, top-`nprobe` centroid scan at query time.
+- Public API: `IndexIVFFlat`, `IVFConfig`, `init`, `deinit`, `train`,
+  `add`, `addWithId`, `search`, `searchBatch` (multi-threaded chunk
+  over queries, mirrors `FlatIndex.searchBatch`).
+- Defaults match FAISS: `nlist=100`, `nprobe=10`. K-means: 10 Lloyd
+  iterations (FAISS uses 25; recall delta is <1% on the typical N/D
+  ranges tested). Deterministic given `seed: u64`.
+- L2-squared metric only at v0.6 (cosine + inner-product follow in
+  v0.7, matching the IndexHNSW v0.3 → v0.4 trajectory).
+- 9 unit tests including a recall test against FlatIndex at N=200
+  D=32 top-10 with nlist=16 nprobe=8. Threshold 0.7; observed 0.83.
+- `bench/bench_ivf.zig` (N=10000 D=128 K=10 Q=100, nlist=100, nprobe=10):
+  - IVF: ~244 μs/query, ~4,089 queries/sec
+  - Flat: ~1,822 μs/query, ~548 queries/sec
+  - **7.45x speedup vs Flat** on uniform [0,1]^128 random data
+  - Recall on uniform random data is 0.31 — this is expected for
+    structureless data where the top-10 nearest are scattered across
+    many cells. Clustered real-world data (embeddings, etc.) recovers
+    the ~95% recall that the FAISS rule-of-thumb describes.
+- Re-exported as `faiss.IndexIVFFlat` + `faiss.IVFConfig`.
+- Test count: 18 → 33 (also picks up HNSW tests via transitive
+  test-discovery reference added to `src/root.zig`).
+
+Honest non-claims for v0.6:
+- **L2-squared only** — cosine + inner-product follow in v0.7.
+- **No PQ compression** — v0.7 path is to combine IVF + PQ into the
+  production FAISS workhorse "IVF-PQ".
+- **K-means init is uniform-random sampling**, not k-means++. v0.7
+  quality bump.
+- **Single-thread training**. Parallel k-means assignment in v0.7
+  (the assignment step is embarrassingly parallel).
+- **Recall on uniformly random data is lower than the FAISS rule-of-
+  thumb 95%** because uniformly random data has no cluster structure
+  for k-means to find.
+
 ## 0.3.0 — 2026-05-21
 
 IndexHNSW: hierarchical navigable small-world approximate index.
