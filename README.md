@@ -75,23 +75,32 @@ claim it until measured.
 3. **f16 / bf16 storage**: 2x memory bandwidth win, modest
    compute cost. Optional.
 
-## What it does
+## What's covered
 
-- `FlatIndex.init(allocator, dim, metric)` — construct in-memory
-  brute-force index
-- Add/search API unchanged from v0.0.1
-- Three metrics: `l2_squared`, `inner_product`, `cosine`
-- **SIMD distance loops via `@Vector(8, f32)`** with scalar tail for
-  non-multiple-of-8 dimensions
+- **FlatIndex** — brute-force kNN with L2-squared / inner-product /
+  cosine. SIMD `@Vector(8, f32)` distance loops, multi-threaded
+  `searchBatch`.
+- **IndexHNSW** — hierarchical navigable small-world approximate
+  index. L2-squared only at v0.3+; default M=16, ef_construction=200,
+  ef_search=100. Greedy multi-level descent + ef_search-bounded layer
+  search.
+- **IndexIVFFlat** — inverted-file approximate index (new in v0.6).
+  Lloyd k-means clusters the training set into `nlist` centroids; at
+  query time we rank centroids and scan the `nprobe` nearest lists.
+  Default nlist=100, nprobe=10, n_iter=10, L2-squared. Observed
+  **7.45x speedup vs FlatIndex** at N=10000 D=128 on this CPU.
 - **Public `faiss.scalar.*` and `faiss.distance.*`** for callers that
-  want to bypass the Index wrapper or compare paths
+  want to bypass the Index wrapper or compare paths.
 
 ## What it does NOT do (yet)
 
-- **IVF + PQ approximate indexes** — v0.6+ (HNSW shipped at v0.5)
-- **GPU** — not a near-term target
-- **Disk-backed indexes** — v0.3
-- **Vector serialisation format** — v0.3
+- **PQ compression / IVF-PQ** — v0.7 path is the production FAISS
+  workhorse.
+- **Cosine + inner-product on HNSW / IVFFlat** — v0.7 (L2-squared
+  only at v0.6).
+- **GPU** — not a near-term target.
+- **Disk-backed indexes** — future.
+- **Vector serialisation format** — future.
 
 ## Quickstart
 
