@@ -1,7 +1,48 @@
 # STATUS
 
-**Version:** v0.3
-**Last update:** 2026-05-21
+**Version:** v0.6
+**Last update:** 2026-05-22
+
+## What landed in v0.6 (on top of v0.5)
+
+- `src/ivf.zig`: complete `IndexIVFFlat` implementation (~430 LOC).
+  Inverted-file approximate index. Lloyd k-means clusters the training
+  set into `nlist` centroids; at query time we rank all `nlist`
+  centroids by distance, then scan only the top `nprobe` lists.
+- Public API mirrors FlatIndex / IndexHNSW: `init`, `deinit`, `train`,
+  `add`, `addWithId`, `search`, `searchBatch` (multi-threaded chunk
+  over queries).
+- Defaults match FAISS: `nlist=100`, `nprobe=10`, `n_iter=10`,
+  `seed=42`. Deterministic given the seed.
+- L2-squared metric only at v0.6. Cosine + inner-product follow in
+  v0.7 (matches the HNSW v0.3 → v0.4 trajectory).
+- 9 unit tests including a recall test against FlatIndex at
+  N=200 D=32 top-10 (nlist=16 nprobe=8): observed 0.83, threshold 0.7.
+- `bench/bench_ivf.zig` at N=10000 D=128 K=10 Q=100 nlist=100 nprobe=10
+  on this Ryzen-class consumer CPU, ReleaseFast:
+  - IVF: 244 μs/query, 4,089 queries/sec
+  - Flat: 1,822 μs/query, 548 queries/sec
+  - **7.45x speedup**
+  - Recall 0.31 on uniformly random data (no cluster structure to find).
+    On clustered real-world embeddings the FAISS rule-of-thumb ~95%
+    recall is expected; the unit test on small N + half-probe-rate
+    measures the algorithm itself works (0.83 observed).
+- Re-exported as `faiss.IndexIVFFlat` + `faiss.IVFConfig`.
+- Test discovery: added a `test { _ = hnsw; _ = ivf; }` block in
+  `src/root.zig` so HNSW + IVF tests are picked up by `zig build test`.
+  Pre-v0.6 only the 18 root-file tests were running; v0.6 surfaces the
+  full 33 (18 root + 5 HNSW + 9 IVF + 1 transitive-ref block).
+
+## Honest non-claims for v0.6
+
+- **L2-squared only** for IVF + HNSW. Cosine / inner-product follow.
+- **No PQ compression.** v0.7 path is IVF + PQ → IVF-PQ.
+- **K-means init is uniform-random sampling**, not k-means++.
+- **Single-thread training.** Parallel k-means assignment in v0.7.
+- **Recall on uniformly random data is lower** than the FAISS rule-
+  of-thumb 95%. That rule assumes data with cluster structure that
+  k-means can find. Uniformly random data spreads the top-10 neighbors
+  across many cells.
 
 ## What landed in v0.3 (on top of v0.2)
 
