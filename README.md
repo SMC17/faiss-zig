@@ -1,7 +1,6 @@
 # faiss-zig
 
-Pure-Zig vector similarity search. Portfolio artifact #2 of the
-8-artifact jaw-drop portfolio (see `the broader sovereign-stack portfolio`).
+Pure-Zig vector similarity search.
 
 ## Status
 
