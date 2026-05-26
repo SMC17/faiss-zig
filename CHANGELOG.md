@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.7.0 — 2026-05-22
+
+IndexIVFPQ: inverted-file index with Product Quantization residual
+encoding. The production FAISS workhorse — combines v0.6 IVFFlat
+coarse quantization with PQ fine quantization for memory-efficient
+ANN search. With this, faiss-zig now covers the four FAISS index
+families that matter: Flat + HNSW + IVFFlat + IVFPQ.
+
+- `src/ivf_pq.zig` (~560 LOC): full IVFPQ per Jégou/Douze/Schmid 2011.
+  Coarse k-means → nlist centroids; per-subspace k-means over residuals
+  → M codebooks of K_s=256 (1 byte each); Asymmetric Distance
+  Computation (ADC) via per-query M×K_s LUT at search time.
+- Public API: `IndexIVFPQ`, `IVFPQConfig` (nlist, nprobe, pq_m, n_iter,
+  seed), `init`, `deinit`, `train`, `add`, `addWithId`, `search`,
+  `searchBatch` (multi-threaded), `memoryBytes` (footprint accessor).
+- Defaults match FAISS: `nlist=100`, `nprobe=10`, `pq_m=8`, `n_iter=10`.
+  Deterministic given `seed: u64`. `pq_m` must evenly divide `dim`.
+- L2-squared metric only at v0.7 (cosine + inner-product in v0.7.1+).
+- 11 unit tests including: config-validation paths (nprobe>nlist,
+  dim%pq_m!=0, pq_m==0), train-required errors, dim-mismatch errors,
+  end-to-end train+add+search, EmptyIndex, **recall vs FlatIndex at
+  N=2000 D=64 M=8 nlist=16 nprobe=8 top-10 (measured 0.360, threshold
+  0.30 with seed-noise margin)**, searchBatch ↔ search agreement,
+  memory-footprint sanity bound.
+- `bench/bench_ivf_pq.zig` (N=10000 D=128 K=10 Q=100 nlist=100
+  nprobe=10 pq_m=8) on Ryzen-class consumer CPU, ReleaseFast:
+  - **IVFPQ: 522 μs/query, 1,915 queries/sec, 3.43x faster than Flat**
+  - IVFFlat (v0.6): 208 μs/query, 4,801 q/s, 8.61x faster than Flat
+  - Flat: 1,792 μs/query, 557 q/s
+  - **Memory footprint: 295 KB total (codes + IDs + codebooks +
+    coarse centroids) vs 5,000 KB raw f32 storage = 16.94x
+    compression**. Per-vector: 8 bytes PQ code + 4 bytes ID = 12
+    bytes/vec vs 512 bytes/vec raw f32 = **42.67x per-vector
+    compression** before metadata.
+- IVFPQ is slower per query than IVFFlat at N=10K because the per-
+  probe ADC LUT build (8 × 256 × 16 = 32K sub-distance computes per
+  query) is a fixed cost regardless of list size. IVFPQ's win shows
+  at larger N (per-vector scan is byte-LUT vs full L2-squared), which
+  is exactly the regime where Flat collapses.
+- Re-exported as `faiss.IndexIVFPQ` + `faiss.IVFPQConfig`.
+- Test count: 33 → 44 (11 IVFPQ).
+
+Honest non-claims for v0.7:
+- **PQ trades recall for memory.** On synthetic uniform [0,1]^D random
+  data the recall drop vs Flat is much larger (0.36 in our test
+  fixture, 0.10 in the N=10K D=128 bench) than the FAISS-published
+  numbers on real (clustered) embeddings like SIFT1M (~0.6-0.8). We
+  do not over-promise; the README cites the measured-on-uniform value.
+- **L2-squared only.** Cosine + inner-product follow in v0.7.1.
+- **No Optimal Product Quantization (OPQ rotation matrix).** v0.8+.
+  OPQ adds a learned rotation before PQ to maximise codebook quality;
+  for axis-correlated data (real embeddings) this matters substantially.
+- **Single-thread training.** Both coarse and per-subspace k-means
+  are sequential; M=8 subspaces × n_iter=10 × N points × K_s=256
+  centroids is the dominant cost. Parallel k-means assignment in v0.8.
+- **K-means init is uniform-random sampling**, not k-means++.
+- **Concrete numbers for memory math** at D=128, M=8:
+  - Per-vector code: 8 bytes
+  - Codebook size: 8 × 256 × 16 × 4 = 128 KB (fixed)
+  - Coarse centroids: nlist × 128 × 4 (e.g. 100 × 512 = 51 KB)
+
 ## 0.6.0 — 2026-05-22
 
 IndexIVFFlat: inverted-file approximate index. Second approximate index
