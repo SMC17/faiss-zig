@@ -77,6 +77,13 @@ claim it until measured.
 
 ## What's covered
 
+| Index family | Module | Default config | Headline perf @ N=10K D=128 |
+|---|---|---|---|
+| Flat (brute-force) | `FlatIndex` | L2 / IP / cosine, SIMD | 1,792 μs/q, 557 q/s, ground truth |
+| HNSW | `IndexHNSW` | M=16, efC=200, efS=100 | (see bench-hnsw) |
+| IVFFlat | `IndexIVFFlat` | nlist=100, nprobe=10 | 208 μs/q, 4,801 q/s, **8.61x vs Flat** |
+| **IVFPQ** | **`IndexIVFPQ`** | **nlist=100, nprobe=10, M=8** | **522 μs/q, 1,915 q/s, 3.43x vs Flat, 16.94x mem compression** |
+
 - **FlatIndex** — brute-force kNN with L2-squared / inner-product /
   cosine. SIMD `@Vector(8, f32)` distance loops, multi-threaded
   `searchBatch`.
@@ -84,20 +91,35 @@ claim it until measured.
   index. L2-squared only at v0.3+; default M=16, ef_construction=200,
   ef_search=100. Greedy multi-level descent + ef_search-bounded layer
   search.
-- **IndexIVFFlat** — inverted-file approximate index (new in v0.6).
+- **IndexIVFFlat** — inverted-file approximate index (v0.6).
   Lloyd k-means clusters the training set into `nlist` centroids; at
   query time we rank centroids and scan the `nprobe` nearest lists.
   Default nlist=100, nprobe=10, n_iter=10, L2-squared. Observed
-  **7.45x speedup vs FlatIndex** at N=10000 D=128 on this CPU.
+  **8.61x speedup vs FlatIndex** at N=10000 D=128 on this CPU.
+- **IndexIVFPQ** — inverted-file + Product Quantization (new in v0.7).
+  Production FAISS workhorse. Coarse k-means → nlist centroids; each
+  vector stored as an M-byte PQ code of its residual against the
+  assigned coarse centroid. Search uses Asymmetric Distance Computation
+  (ADC) via a per-query M × 256 LUT — pure byte-fetch + sum, no
+  per-vector multiply. Default nlist=100, nprobe=10, pq_m=8.
+  **16.94x memory compression** vs raw f32 storage at N=10K D=128
+  (295 KB total vs 5,000 KB), **42.67x per-vector compression**
+  (12 bytes/vec vs 512). Recall trades against memory: 0.10 on
+  uniform [0,1]^128 random data at this config (real clustered
+  embeddings recover toward FAISS-published 0.6-0.8 R@10).
 - **Public `faiss.scalar.*` and `faiss.distance.*`** for callers that
   want to bypass the Index wrapper or compare paths.
 
 ## What it does NOT do (yet)
 
-- **PQ compression / IVF-PQ** — v0.7 path is the production FAISS
-  workhorse.
-- **Cosine + inner-product on HNSW / IVFFlat** — v0.7 (L2-squared
-  only at v0.6).
+- **Cosine + inner-product on HNSW / IVFFlat / IVFPQ** — v0.7.1
+  (L2-squared only at v0.7).
+- **Optimal Product Quantization (OPQ rotation matrix)** — v0.8+.
+  OPQ rotates inputs to maximise PQ codebook quality on axis-
+  correlated data.
+- **k-means++ init** — v0.8 quality bump. Currently uniform-random
+  sampling.
+- **Parallel k-means training** — v0.8. Currently single-thread.
 - **GPU** — not a near-term target.
 - **Disk-backed indexes** — future.
 - **Vector serialisation format** — future.

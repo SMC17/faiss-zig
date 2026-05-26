@@ -113,4 +113,20 @@ pub fn build(b: *std.Build) void {
     run_bench_ivf.has_side_effects = true;
     const bench_ivf_step = b.step("bench-ivf", "IVFFlat bench at N=10000 D=128 nlist=100 nprobe=10");
     bench_ivf_step.dependOn(&run_bench_ivf.step);
+
+    // IVFPQ bench. ReleaseFast for production timing.
+    const bench_ivf_pq_mod = b.createModule(.{
+        .root_source_file = b.path("bench/bench_ivf_pq.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    bench_ivf_pq_mod.addImport("faiss", mod);
+    const bench_ivf_pq_exe = b.addExecutable(.{
+        .name = "bench-ivf-pq",
+        .root_module = bench_ivf_pq_mod,
+    });
+    const run_bench_ivf_pq = b.addRunArtifact(bench_ivf_pq_exe);
+    run_bench_ivf_pq.has_side_effects = true;
+    const bench_ivf_pq_step = b.step("bench-ivf-pq", "IVFPQ bench at N=10000 D=128 M=8 nlist=100 nprobe=10");
+    bench_ivf_pq_step.dependOn(&run_bench_ivf_pq.step);
 }

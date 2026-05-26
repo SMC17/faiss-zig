@@ -240,6 +240,11 @@ pub const ivf = @import("ivf.zig");
 pub const IndexIVFFlat = ivf.IndexIVFFlat;
 pub const IVFConfig = ivf.IVFConfig;
 
+// Re-export IVFPQ
+pub const ivf_pq = @import("ivf_pq.zig");
+pub const IndexIVFPQ = ivf_pq.IndexIVFPQ;
+pub const IVFPQConfig = ivf_pq.IVFPQConfig;
+
 // ============================================================================
 // Distance / similarity primitives — SIMD where dimension fits a clean
 // multiple of the lane width, scalar tail otherwise.
@@ -364,6 +369,7 @@ const testing = std.testing;
 test {
     _ = hnsw;
     _ = ivf;
+    _ = ivf_pq;
 }
 
 test "FlatIndex.l2 — empty index returns EmptyIndex" {

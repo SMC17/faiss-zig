@@ -1,7 +1,63 @@
 # STATUS
 
-**Version:** v0.6
+**Version:** v0.7
 **Last update:** 2026-05-22
+
+## What landed in v0.7 (on top of v0.6)
+
+- `src/ivf_pq.zig`: complete `IndexIVFPQ` implementation (~560 LOC).
+  Inverted-file index with Product Quantization residual encoding —
+  the production FAISS workhorse. With this, faiss-zig covers the
+  four FAISS index families that matter: Flat + HNSW + IVFFlat +
+  IVFPQ.
+- Algorithm per Jégou/Douze/Schmid 2011: coarse k-means → nlist
+  centroids; per-subspace k-means over residuals → M codebooks of
+  K_s=256 (1 byte/code); search uses Asymmetric Distance Computation
+  (ADC) via a per-query M × 256 LUT — pure byte-fetch + sum on the
+  database side.
+- Public API mirrors IVFFlat: `init`, `deinit`, `train`, `add`,
+  `addWithId`, `search`, `searchBatch`. Plus `memoryBytes` accessor.
+- Defaults: `nlist=100`, `nprobe=10`, `pq_m=8`, `n_iter=10`. `pq_m`
+  must evenly divide `dim`. L2-squared metric only at v0.7.
+- 11 unit tests including:
+  - Config-validation paths (nprobe>nlist, dim%pq_m!=0, pq_m==0)
+  - Train-required errors (add/search before train)
+  - Dim-mismatch errors (train/add/search)
+  - End-to-end train + add + search returns the added id
+  - EmptyIndex error before any add
+  - **Recall vs FlatIndex at N=2000 D=64 M=8 nlist=16 nprobe=8 top-10:
+    measured 0.360, threshold 0.30 with seed-noise margin**
+  - searchBatch ↔ search agreement
+  - Memory-footprint sanity bound
+- `bench/bench_ivf_pq.zig` (N=10000 D=128 K=10 Q=100 nlist=100
+  nprobe=10 pq_m=8) on this Ryzen-class consumer CPU, ReleaseFast:
+  - **IVFPQ: 522 μs/query, 1,915 q/s, 3.43x vs Flat**
+  - IVFFlat (v0.6): 208 μs/query, 4,801 q/s, 8.61x vs Flat
+  - Flat: 1,792 μs/query, 557 q/s
+  - **Memory: 295 KB total (codes+IDs+codebooks+coarse centroids)
+    vs 5,000 KB raw f32 storage = 16.94x compression**, per-vector
+    12 bytes vs 512 bytes = 42.67x.
+  - IVFPQ recall on uniform random N=10K D=128: 0.10 (honest
+    measurement — uniform data has no cluster structure to exploit)
+- Re-exported as `faiss.IndexIVFPQ` + `faiss.IVFPQConfig`.
+- Test count: 33 → **44** (11 new IVFPQ tests).
+
+## Honest non-claims for v0.7
+
+- **PQ trades recall for memory.** Uniform random data is the worst
+  case for codebook quality; real embeddings recover most of the
+  FAISS-published recall but we don't claim numbers we haven't
+  measured.
+- **L2-squared only.** Cosine + IP follow.
+- **No OPQ rotation.** v0.8+.
+- **Single-thread training.** Per-subspace k-means is sequential.
+- **K-means init is uniform sampling**, not k-means++.
+- **At N=10K IVFPQ is slower than IVFFlat per query** because the
+  per-probe LUT build (8 × 256 × 16 = 32K sub-distance computes per
+  query) is amortised over only ~100 vectors/list. The IVFPQ win
+  shows at larger N where the per-vector ADC cost (byte-fetch + sum)
+  beats IVFFlat's full L2-squared per vector — which is also where
+  the **memory** win matters.
 
 ## What landed in v0.6 (on top of v0.5)
 
