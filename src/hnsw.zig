@@ -94,6 +94,14 @@ pub const IndexHNSW = struct {
     /// Entry point: node index + level. -1 means empty index.
     entry_point: i32 = -1,
     max_level: u8 = 0,
+    /// CSR layout for level-0 edges, populated by finalize(). When non-null,
+    /// searchLayer + greedyDescend use this flat array instead of the nested
+    /// ArrayList path at level 0. Net win is one pointer-chase removed per
+    /// node visit in the hot inner loop. Layout:
+    ///   csr_offsets: []u32, length N+1. csr_offsets[i]..csr_offsets[i+1]
+    ///   is the slice of level-0 neighbors for node i in csr_edges.
+    csr_offsets: ?[]u32 = null,
+    csr_edges: ?[]u32 = null,
 
     pub fn init(allocator: std.mem.Allocator, dim: u32, config: Config) IndexHNSW {
         return .{
@@ -115,6 +123,54 @@ pub const IndexHNSW = struct {
             node_conn.deinit(self.allocator);
         }
         self.connections.deinit(self.allocator);
+        if (self.csr_offsets) |s| self.allocator.free(s);
+        if (self.csr_edges) |s| self.allocator.free(s);
+    }
+
+    /// Materialize the level-0 adjacency into a CSR (Compressed Sparse Row)
+    /// layout. After this call, searchLayer + greedyDescend use the CSR
+    /// path at level 0, removing one pointer-chase per node visit.
+    /// Call AFTER all add() operations. add() invalidates CSR (sets to null).
+    pub fn finalize(self: *IndexHNSW) !void {
+        const n = self.connections.items.len;
+        if (n == 0) return;
+        const offsets = try self.allocator.alloc(u32, n + 1);
+        errdefer self.allocator.free(offsets);
+
+        var total: u32 = 0;
+        for (self.connections.items, 0..) |node_conn, i| {
+            offsets[i] = total;
+            if (node_conn.items.len > 0) {
+                total += @intCast(node_conn.items[0].items.len);
+            }
+        }
+        offsets[n] = total;
+
+        const edges = try self.allocator.alloc(u32, total);
+        errdefer self.allocator.free(edges);
+
+        for (self.connections.items, 0..) |node_conn, i| {
+            const start = offsets[i];
+            if (node_conn.items.len > 0) {
+                const lvl0 = node_conn.items[0].items;
+                @memcpy(edges[start .. start + lvl0.len], lvl0);
+            }
+        }
+
+        if (self.csr_offsets) |s| self.allocator.free(s);
+        if (self.csr_edges) |s| self.allocator.free(s);
+        self.csr_offsets = offsets;
+        self.csr_edges = edges;
+    }
+
+    inline fn level0Edges(self: *const IndexHNSW, node_id: u32) []const u32 {
+        if (self.csr_offsets) |off| {
+            const i: usize = @intCast(node_id);
+            const start = off[i];
+            const end = off[i + 1];
+            return self.csr_edges.?[start..end];
+        }
+        return self.connections.items[node_id].items[0].items;
     }
 
     pub fn len(self: *const IndexHNSW) usize {
@@ -144,6 +200,16 @@ pub const IndexHNSW = struct {
 
     pub fn add(self: *IndexHNSW, vector: []const f32) !u32 {
         if (vector.len != self.dim) return Error.DimensionMismatch;
+        // Adding a node invalidates the CSR layout. Caller must
+        // re-finalize() to rebuild the flat edge array.
+        if (self.csr_offsets) |s| {
+            self.allocator.free(s);
+            self.csr_offsets = null;
+        }
+        if (self.csr_edges) |s| {
+            self.allocator.free(s);
+            self.csr_edges = null;
+        }
         const id: u32 = @intCast(self.ids.items.len);
         try self.vectors.appendSlice(self.allocator, vector);
         try self.ids.append(self.allocator, id);
@@ -183,17 +249,61 @@ pub const IndexHNSW = struct {
             const candidates = try self.searchLayer(vector, &[_]u32{cur_node}, ef, @intCast(l));
             defer self.allocator.free(candidates);
 
-            // Pick M-nearest among candidates as new node's neighbors at this level.
-            const num_neighbors: usize = @min(self.config.M, candidates.len);
+            // Heuristic neighbor selection (Malkov & Yashunin 2016 Alg 4):
+            // pick M neighbors that DIVERSIFY direction from this node. A
+            // candidate c is accepted only if no already-chosen r satisfies
+            // dist(c, r) < dist(c, new_node). M-nearest by raw distance
+            // produces a clustered graph; the heuristic produces a navigable
+            // small-world graph with much higher recall at the same ef_search.
+            // candidates are already sorted ascending by dist to new_node.
+            const M_cap: usize = self.config.M;
+            const selected = try self.allocator.alloc(Candidate, M_cap);
+            defer self.allocator.free(selected);
+            var n_sel: usize = 0;
+
+            for (candidates) |c| {
+                if (n_sel >= M_cap) break;
+                const c_vec = self.vectorAt(c.id);
+                var covered = false;
+                for (selected[0..n_sel]) |r| {
+                    const d_cr = l2sq(c_vec, self.vectorAt(r.id));
+                    if (d_cr < c.dist) {
+                        covered = true;
+                        break;
+                    }
+                }
+                if (!covered) {
+                    selected[n_sel] = c;
+                    n_sel += 1;
+                }
+            }
+
+            // Backfill if heuristic was strict
+            if (n_sel < M_cap) {
+                for (candidates) |c| {
+                    if (n_sel >= M_cap) break;
+                    var already_picked = false;
+                    for (selected[0..n_sel]) |r| {
+                        if (r.id == c.id) {
+                            already_picked = true;
+                            break;
+                        }
+                    }
+                    if (!already_picked) {
+                        selected[n_sel] = c;
+                        n_sel += 1;
+                    }
+                }
+            }
+
             var i: usize = 0;
-            while (i < num_neighbors) : (i += 1) {
-                const neighbor_id = candidates[i].id;
+            while (i < n_sel) : (i += 1) {
+                const neighbor_id = selected[i].id;
                 try self.connections.items[id].items[@intCast(l)].append(self.allocator, neighbor_id);
 
-                // Also add reciprocal edge from neighbor → id, pruning if exceeds M
+                // Reciprocal edge with heuristic prune if oversize
                 const neighbor_conns = &self.connections.items[neighbor_id].items[@intCast(l)];
                 try neighbor_conns.append(self.allocator, id);
-                // Prune if oversize (keep M nearest)
                 if (neighbor_conns.items.len > self.config.M) {
                     try self.pruneNeighbors(neighbor_id, @intCast(l));
                 }
@@ -231,7 +341,11 @@ pub const IndexHNSW = struct {
             // <= the previous search level but < the next iteration's
             // level.
             if (level >= cur_conns.items.len) break;
-            for (cur_conns.items[level].items) |n| {
+            const neighbors: []const u32 = if (level == 0)
+                self.level0Edges(cur_node)
+            else
+                cur_conns.items[level].items;
+            for (neighbors) |n| {
                 const d = l2sq(self.vectorAt(n), query);
                 if (d < cur_dist) {
                     cur_dist = d;
@@ -250,15 +364,23 @@ pub const IndexHNSW = struct {
         ef: u32,
         level: u8,
     ) ![]Candidate {
-        var visited = std.AutoHashMap(u32, void).init(self.allocator);
-        defer visited.deinit();
+        // Packed bitset visited: one bit per node, replaces the std.AutoHashMap
+        // probe with a single bit-test in the hot inner loop. At N=10K this is
+        // 1.25 KB = fits L1. Cleared via @memset to 0.
+        const n_nodes = self.connections.items.len;
+        const bitset_bytes = (n_nodes + 7) / 8;
+        const visited_bits = try self.allocator.alloc(u8, bitset_bytes);
+        defer self.allocator.free(visited_bits);
+        @memset(visited_bits, 0);
 
         // Candidates min-heap (sorted by distance ascending — nearest first)
         var candidates: std.PriorityQueue(Candidate, void, candidateLess) = .empty;
         defer candidates.deinit(self.allocator);
+        try candidates.ensureTotalCapacity(self.allocator, ef);
         // Results max-heap (we keep top ef nearest; reject when full + new is farther)
         var results: std.PriorityQueue(Candidate, void, candidateMore) = .empty;
         defer results.deinit(self.allocator);
+        try results.ensureTotalCapacity(self.allocator, ef);
 
         for (entry_points) |ep| {
             const d = l2sq(self.vectorAt(ep), query);
@@ -270,7 +392,7 @@ pub const IndexHNSW = struct {
             if (level < self.connections.items[ep].items.len) {
                 try results.push(self.allocator, .{ .dist = d, .id = ep });
             }
-            try visited.put(ep, {});
+            visited_bits[ep / 8] |= @as(u8, 1) << @intCast(ep % 8);
         }
 
         while (candidates.pop()) |c| {
@@ -280,9 +402,15 @@ pub const IndexHNSW = struct {
             // Skip nodes that don't exist at this level
             const c_conns = self.connections.items[c.id];
             if (level >= c_conns.items.len) continue;
-            for (c_conns.items[level].items) |n| {
-                if (visited.contains(n)) continue;
-                try visited.put(n, {});
+            const neighbors: []const u32 = if (level == 0)
+                self.level0Edges(c.id)
+            else
+                c_conns.items[level].items;
+            for (neighbors) |n| {
+                const byte_idx = n / 8;
+                const bit_mask: u8 = @as(u8, 1) << @intCast(n % 8);
+                if ((visited_bits[byte_idx] & bit_mask) != 0) continue;
+                visited_bits[byte_idx] |= bit_mask;
                 const d = l2sq(self.vectorAt(n), query);
                 if (results.count() < ef or d < results.peek().?.dist) {
                     try candidates.push(self.allocator, .{ .dist = d, .id = n });
@@ -309,7 +437,11 @@ pub const IndexHNSW = struct {
     fn pruneNeighbors(self: *IndexHNSW, node_id: u32, level: u8) !void {
         const conns = &self.connections.items[node_id].items[level];
         const node_vec = self.vectorAt(node_id);
-        // Rank neighbors by distance, keep nearest M
+        // select_neighbors_heuristic per Malkov & Yashunin 2016 Algorithm 4:
+        // diversify selections so each chosen neighbor opens a NEW direction
+        // from node_id. Accept candidate c only if no already-chosen result r
+        // satisfies dist(c, r) < dist(c, node_id) — meaning c is "covered" by
+        // r and doesn't add reachability beyond r.
         const cand = try self.allocator.alloc(Candidate, conns.items.len);
         defer self.allocator.free(cand);
         for (conns.items, 0..) |n, idx| {
@@ -320,9 +452,52 @@ pub const IndexHNSW = struct {
                 return a.dist < b.dist;
             }
         }.lt);
+
+        const keep_cap: usize = @min(self.config.M, cand.len);
+        const chosen = try self.allocator.alloc(Candidate, keep_cap);
+        defer self.allocator.free(chosen);
+        var n_chosen: usize = 0;
+
+        for (cand) |c| {
+            if (n_chosen >= keep_cap) break;
+            const c_vec = self.vectorAt(c.id);
+            var covered = false;
+            for (chosen[0..n_chosen]) |r| {
+                const d_cr = l2sq(c_vec, self.vectorAt(r.id));
+                if (d_cr < c.dist) {
+                    covered = true;
+                    break;
+                }
+            }
+            if (!covered) {
+                chosen[n_chosen] = c;
+                n_chosen += 1;
+            }
+        }
+
+        // Backfill: if heuristic was strict and chosen < M, fill remaining
+        // slots with the nearest unselected candidates (Malkov's extendCandidates
+        // option). This preserves the "always at least M" invariant other
+        // HNSW invariants depend on.
+        if (n_chosen < keep_cap) {
+            for (cand) |c| {
+                if (n_chosen >= keep_cap) break;
+                var already_picked = false;
+                for (chosen[0..n_chosen]) |r| {
+                    if (r.id == c.id) {
+                        already_picked = true;
+                        break;
+                    }
+                }
+                if (!already_picked) {
+                    chosen[n_chosen] = c;
+                    n_chosen += 1;
+                }
+            }
+        }
+
         conns.clearRetainingCapacity();
-        const keep: usize = @min(self.config.M, cand.len);
-        for (cand[0..keep]) |c| {
+        for (chosen[0..n_chosen]) |c| {
             try conns.append(self.allocator, c.id);
         }
     }
