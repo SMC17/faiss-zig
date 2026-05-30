@@ -17,7 +17,7 @@ single-binary, libc-only.
 | Flat         | `FlatIndex`     | L2 / IP / cosine, SIMD     | 1,792 µs/q, 557 q/s, ground truth                          |
 | HNSW         | `IndexHNSW`     | M=16, efC=200, efS=100     | 70%+ top-10 recall vs Flat                                |
 | IVFFlat      | `IndexIVFFlat`  | nlist=100, nprobe=10       | 208 µs/q, 4,801 q/s, **8.61x vs Flat**                    |
-| IVFPQ        | `IndexIVFPQ`    | nlist=100, nprobe=10, M=8  | 522 µs/q, 1,915 q/s, **3.43x vs Flat, 16.94x mem-compression** |
+| IVFPQ        | `IndexIVFPQ`    | nlist=100, nprobe=10, M=8  | 522 µs/q, 1,915 q/s, **3.43x vs Flat, 16.94x mem-compression** (recall 0.10 on uniform random; clustered embeddings recover to FAISS-published 0.6-0.8 R@10) |
 
 End-to-end head-to-head against `faiss-cpu` (Python wrapper of
 `facebookresearch/faiss`) on N=10000, D=128, K=10, Q=100, L2:
@@ -71,11 +71,11 @@ that the strict single-accumulator scalar reduction can't.
   LUT — pure byte-fetch + sum, no per-vector multiply. Default
   nlist=100, nprobe=10, pq_m=8. **16.94x memory compression** vs
   raw f32 storage at N=10K D=128 (295 KB total vs 5,000 KB),
-  **42.67x per-vector compression** (12 bytes/vec vs 512).
-
-  Recall trades against memory: 0.10 on uniform [0,1]^128 random
-  data at this config (real clustered embeddings recover toward
-  the FAISS-published 0.6–0.8 R@10).
+  **42.67x per-vector compression** (12 bytes/vec vs 512). Recall
+  trades against memory: 0.10 on uniform [0,1]^128 random data
+  at this config; real clustered embeddings recover toward the
+  FAISS-published 0.6-0.8 R@10. Do not cite the compression ratio
+  without the recall qualifier.
 
 - **Public `faiss.scalar.*` / `faiss.distance.*`** for callers
   that want to bypass the Index wrapper or compare paths.
