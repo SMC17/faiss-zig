@@ -119,8 +119,12 @@ pub const FlatIndex = struct {
         if (n == 0) return Error.EmptyIndex;
 
         const effective_k = @min(k, n);
-        var all_hits = try alloc.alloc(Hit, n);
-        defer alloc.free(all_hits);
+        const direction: topk_heap.TopKDirection = switch (self.metric) {
+            .l2_squared => .ascending,
+            .inner_product, .cosine => .descending,
+        };
+        var heap = try topk_heap.TopKHeap.init(alloc, effective_k, direction);
+        defer heap.deinit();
 
         const query_norm = if (self.metric == .cosine) blk: {
             const qn = vectorNorm(query);
@@ -137,18 +141,10 @@ pub const FlatIndex = struct {
                 .inner_product => innerProduct(query, v),
                 .cosine => innerProduct(query, v) / (query_norm * self.norms.items[i]),
             };
-            all_hits[i] = .{ .id = self.ids.items[i], .score = score };
+            heap.offer(.{ .id = self.ids.items[i], .score = score });
         }
 
-        // Sort by score in the appropriate direction.
-        switch (self.metric) {
-            .l2_squared => std.sort.pdq(Hit, all_hits, {}, hitLessL2),
-            .inner_product, .cosine => std.sort.pdq(Hit, all_hits, {}, hitMoreIP),
-        }
-
-        const out = try alloc.alloc(Hit, effective_k);
-        @memcpy(out, all_hits[0..effective_k]);
-        return out;
+        return try heap.intoSortedSlice(alloc);
     }
 
     /// Multi-threaded batched kNN search. Spawns `n_threads` worker
