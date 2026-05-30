@@ -366,6 +366,11 @@ const testing = std.testing;
 // only auto-collects from the test root and direct `pub const`
 // re-exports won't pull in tests under those declarations unless
 // referenced from a test block).
+pub const topk_heap = @import("topk_heap.zig");
+pub const TopKHeap = topk_heap.TopKHeap;
+pub const TopKDirection = topk_heap.TopKDirection;
+pub const TopKHeapError = topk_heap.Error;
+
 test {
     _ = hnsw;
     _ = ivf;
