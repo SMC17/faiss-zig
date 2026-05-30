@@ -372,6 +372,16 @@ pub const recallAtK = recall_at_k.recallAtK;
 pub const meanRecallOverQueries = recall_at_k.meanRecallOverQueries;
 pub const RecallAtKError = recall_at_k.Error;
 
+pub const index_metric_signature = @import("index_metric_signature.zig");
+pub const IndexKind = index_metric_signature.IndexKind;
+pub const IndexSignature = index_metric_signature.IndexSignature;
+pub const signatureForFlat = index_metric_signature.forFlat;
+pub const signatureForHnsw = index_metric_signature.forHnsw;
+pub const signatureForIvf = index_metric_signature.forIvf;
+pub const signatureForIvfPq = index_metric_signature.forIvfPq;
+pub const signaturesMatch = index_metric_signature.matches;
+pub const signatureDescription = index_metric_signature.description;
+
 test {
     _ = hnsw;
     _ = ivf;
