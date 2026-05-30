@@ -386,6 +386,9 @@ test {
     _ = hnsw;
     _ = ivf;
     _ = ivf_pq;
+    _ = topk_heap;
+    _ = recall_at_k;
+    _ = index_metric_signature;
 }
 
 test "FlatIndex.l2 — empty index returns EmptyIndex" {
