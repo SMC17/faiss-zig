@@ -367,6 +367,11 @@ pub const TopKHeap = topk_heap.TopKHeap;
 pub const TopKDirection = topk_heap.TopKDirection;
 pub const TopKHeapError = topk_heap.Error;
 
+pub const recall_at_k = @import("recall_at_k.zig");
+pub const recallAtK = recall_at_k.recallAtK;
+pub const meanRecallOverQueries = recall_at_k.meanRecallOverQueries;
+pub const RecallAtKError = recall_at_k.Error;
+
 test {
     _ = hnsw;
     _ = ivf;
