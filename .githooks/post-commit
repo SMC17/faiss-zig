@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# post-commit hook — auto-regenerate NEXT.md after every commit.
+# Wrapped in `|| true` so checkpoint failures NEVER abort a future commit.
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+[[ -z "$REPO_ROOT" ]] && exit 0
+"$REPO_ROOT/scripts/checkpoint.sh" >/dev/null 2>&1 || true
