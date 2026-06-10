@@ -1,5 +1,7 @@
 # faiss-zig
 
+**`tier-1 reproducible substrate`** · `flake.nix` · `scripts/checkpoint.sh` · `.githooks/post-commit`
+
 [![CI](https://github.com/SMC17/faiss-zig/actions/workflows/ci.yml/badge.svg)](https://github.com/SMC17/faiss-zig/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/SMC17/faiss-zig?sort=semver)](https://github.com/SMC17/faiss-zig/releases)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
@@ -162,3 +164,14 @@ AGPL-3.0-or-later. See `LICENSE`.
   clustered real embeddings; the 0.10 R@10 number at default
   config on uniform [0,1]^128 is an artifact of the worst-case
   distribution, not the expected real-world recall.
+
+## Reproducible setup
+
+```
+nix develop        # Zig 0.16.0 + jq + curl + gawk + python3(websockets)
+zig build test     # 44/44 expected
+```
+
+The repo's `flake.nix` pins exact dep versions (see `STATUS.md`).
+`scripts/checkpoint.sh` + `.githooks/post-commit` auto-regenerate
+`NEXT.md` after every commit (opt-in: `git config core.hooksPath .githooks`).

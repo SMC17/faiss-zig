@@ -8,3 +8,6 @@ __pycache__/
 *.swp
 *.bin
 *.fvecs
+.direnv/
+result
+result-*
