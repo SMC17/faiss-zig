@@ -241,6 +241,15 @@ pub const ivf_pq = @import("ivf_pq.zig");
 pub const IndexIVFPQ = ivf_pq.IndexIVFPQ;
 pub const IVFPQConfig = ivf_pq.IVFPQConfig;
 
+// Morphogenetic Substrates
+pub const vector_morphogenetic = @import("vector_morphogenetic.zig");
+pub const topological_vector = @import("topological_vector.zig");
+pub const TopologicalHash = topological_vector.TopologicalHash;
+pub const extractFeatures = topological_vector.extractFeatures;
+pub const ivf_morphogenetic = @import("ivf_morphogenetic.zig");
+pub const hnsw_morphogenetic = @import("hnsw_morphogenetic.zig");
+pub const hnsw_hybrid = @import("hnsw_hybrid.zig");
+
 // ============================================================================
 // Distance / similarity primitives — SIMD where dimension fits a clean
 // multiple of the lane width, scalar tail otherwise.
