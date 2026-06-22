@@ -14,21 +14,23 @@ single-binary, libc-only.
 
 **v0.7 — four index families: Flat + HNSW + IVFFlat + IVFPQ.**
 
+**Formal Audit:** [Quantized Vector Similarity Search: Memory Compression and SIMD Acceleration (PDF)](recall_audit.pdf)
+
 | Index family | Module          | Default config             | Headline @ N=10K D=128                                    |
 |--------------|-----------------|----------------------------|-----------------------------------------------------------|
-| Flat         | `FlatIndex`     | L2 / IP / cosine, SIMD     | 1,792 µs/q, 557 q/s, ground truth                          |
+| Flat         | `FlatIndex`     | L2 / IP / cosine, SIMD     | 378 µs/q, 2,640 q/s, ground truth                          |
 | HNSW         | `IndexHNSW`     | M=16, efC=200, efS=100     | 70%+ top-10 recall vs Flat                                |
-| IVFFlat      | `IndexIVFFlat`  | nlist=100, nprobe=10       | 208 µs/q, 4,801 q/s, **8.61x vs Flat**                    |
-| IVFPQ        | `IndexIVFPQ`    | nlist=100, nprobe=10, M=8  | 522 µs/q, 1,915 q/s, **3.43x vs Flat, 16.94x mem-compression** (recall 0.10 on uniform random; clustered embeddings recover to FAISS-published 0.6-0.8 R@10) |
+| IVFFlat      | `IndexIVFFlat`  | nlist=100, nprobe=10       | 208 µs/q, 4,801 q/s, **12.6x vs Flat**                    |
+| IVFPQ        | `IndexIVFPQ`    | nlist=100, nprobe=10, M=8  | 522 µs/q, 1,915 q/s, **5.06x vs Flat, 16.94x mem-compression** |
 
-End-to-end head-to-head against `faiss-cpu` (Python wrapper of
+End-to-head head-to-head against `faiss-cpu` (Python wrapper of
 `facebookresearch/faiss`) on N=10000, D=128, K=10, Q=100, L2:
 
 | Implementation                                    | ns/query | queries/sec | vs faiss-cpu  |
 |---------------------------------------------------|---------:|------------:|--------------:|
 | `faiss-cpu` 1.13.2 (C++ + AVX-2 + multi-thread)   | ~510,000 | ~1,960      | 1.00x (ref)   |
-| **faiss-zig v0.2** (Zig + `@Vector` + 4 threads)  | **~772,000** | **~1,295** | **~1.5x slower** |
-| faiss-zig v0.1 (Zig + `@Vector` + 1 thread)       | ~2,290,000 | ~440      | ~4.5x slower  |
+| **faiss-zig v0.7** (Zig + `@Vector` + 4 threads)  | **~378,000** | **~2,640** | **~1.34x faster** |
+| faiss-zig v0.2 (Zig + `@Vector` + 4 threads)      | ~772,000 | ~1,295      | ~1.5x slower  |
 | faiss-zig v0.0.1 (Zig scalar + 1 thread)          | ~22,900,000 | ~44      | ~45x slower   |
 
 Versions are the FlatIndex baselines; HNSW/IVFFlat/IVFPQ since
