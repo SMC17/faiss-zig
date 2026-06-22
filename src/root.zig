@@ -226,6 +226,55 @@ pub const FlatIndex = struct {
     }
 };
 
+// Unified Index Interface
+pub const Index = union(enum) {
+    flat: FlatIndex,
+    ivf: IndexIVFFlat,
+    ivf_pq: IndexIVFPQ,
+    hnsw: IndexHNSW,
+
+    pub fn deinit(self: *Index) void {
+        switch (self.*) {
+            .flat => |*idx| idx.deinit(),
+            .ivf => |*idx| idx.deinit(),
+            .ivf_pq => |*idx| idx.deinit(),
+            .hnsw => |*idx| idx.deinit(),
+        }
+    }
+
+    pub fn len(self: *const Index) usize {
+        return switch (self.*) {
+            .flat => |*idx| idx.len(),
+            .ivf => |*idx| idx.len(),
+            .ivf_pq => |*idx| idx.len(),
+            .hnsw => |*idx| idx.len(),
+        };
+    }
+
+    pub fn add(self: *Index, vector: []const f32) !u32 {
+        return switch (self.*) {
+            .flat => |*idx| idx.add(vector),
+            .ivf => |*idx| idx.add(vector),
+            .ivf_pq => |*idx| idx.add(vector),
+            .hnsw => |*idx| idx.add(vector),
+        };
+    }
+
+    pub fn search(
+        self: *const Index,
+        alloc: std.mem.Allocator,
+        query: []const f32,
+        k: usize,
+    ) ![]Hit {
+        return switch (self.*) {
+            .flat => |*idx| idx.search(alloc, query, k),
+            .ivf => |*idx| idx.search(alloc, query, k),
+            .ivf_pq => |*idx| idx.search(alloc, query, k),
+            .hnsw => |*idx| idx.search(alloc, query, k),
+        };
+    }
+};
+
 // Re-export HNSW
 pub const hnsw = @import("hnsw.zig");
 pub const IndexHNSW = hnsw.IndexHNSW;
