@@ -16,7 +16,7 @@
 //!     `nprobe` nearest, scan only those lists for top-k.
 //!
 //! v0.6 scope:
-//!   - L2-squared metric only (cosine + inner-product in v0.7)
+//!   - L2-squared, inner-product, and cosine metrics (v0.8)
 //!   - Lloyd k-means init (not k-means++; v0.7 quality bump)
 //!   - 10 iterations default (FAISS does 25; difference in recall is
 //!     <1% on the typical N/D ranges)
