@@ -27,6 +27,7 @@
 //!     queries pattern as `FlatIndex.searchBatch`
 
 const std = @import("std");
+const root = @import("root.zig");
 
 pub const Error = error{
     DimensionMismatch,
@@ -54,6 +55,11 @@ pub const IVFConfig = struct {
     /// Deterministic seed for k-means init (centroid sampling) and
     /// any random tiebreaks.
     seed: u64 = 42,
+    /// Distance metric.
+    ///   l2_squared:    Euclidean² — default, hit.score = dist (lower = nearer)
+    ///   inner_product: hit.score = +IP (higher = more similar)
+    ///   cosine:        vectors normalised at train/add/query; hit.score = cosθ
+    metric: root.Metric = .l2_squared,
 };
 
 const Vec8 = @Vector(8, f32);
@@ -75,6 +81,32 @@ fn l2sq(a: []const f32, b: []const f32) f32 {
         sum += d * d;
     }
     return sum;
+}
+
+fn ip(a: []const f32, b: []const f32) f32 {
+    var sum_vec: Vec8 = @splat(0.0);
+    var i: usize = 0;
+    const tail = a.len - (a.len % LANE);
+    while (i < tail) : (i += LANE) {
+        const av: Vec8 = a[i..][0..LANE].*;
+        const bv: Vec8 = b[i..][0..LANE].*;
+        sum_vec += av * bv;
+    }
+    var sum: f32 = @reduce(.Add, sum_vec);
+    while (i < a.len) : (i += 1) sum += a[i] * b[i];
+    return sum;
+}
+
+fn normalizeInPlace(buf: []f32) void {
+    const n = @sqrt(ip(buf, buf));
+    if (n < 1e-12) return;
+    for (buf) |*x| x.* /= n;
+}
+
+fn normalizedCopy(alloc: std.mem.Allocator, v: []const f32) ![]f32 {
+    const out = try alloc.dupe(f32, v);
+    normalizeInPlace(out);
+    return out;
 }
 
 /// (distance, id) pair used in the centroid scan + per-list scan.
@@ -107,6 +139,14 @@ pub const IndexIVFFlat = struct {
 
     next_id: u32 = 0,
     trained: bool = false,
+
+    inline fn dist(self: *const IndexIVFFlat, a: []const f32, b: []const f32) f32 {
+        return switch (self.config.metric) {
+            .l2_squared => l2sq(a, b),
+            .inner_product => -ip(a, b),
+            .cosine => -ip(a, b),
+        };
+    }
 
     pub fn init(allocator: std.mem.Allocator, dim: u32, config: IVFConfig) Error!IndexIVFFlat {
         if (config.nlist == 0 or config.nprobe == 0 or config.nprobe > config.nlist) {
@@ -152,12 +192,13 @@ pub const IndexIVFFlat = struct {
     }
 
     /// Find the nearest centroid index for `v` (linear scan over nlist).
+    /// For cosine/IP, `v` must already be normalised by the caller.
     fn nearestCentroid(self: *const IndexIVFFlat, v: []const f32) u32 {
         var best_c: u32 = 0;
         var best_d: f32 = std.math.floatMax(f32);
         var c: u32 = 0;
         while (c < self.config.nlist) : (c += 1) {
-            const d = l2sq(self.centroidAt(c), v);
+            const d = self.dist(self.centroidAt(c), v);
             if (d < best_d) {
                 best_d = d;
                 best_c = c;
@@ -168,10 +209,27 @@ pub const IndexIVFFlat = struct {
 
     /// Lloyd k-means training. `training` is a flat [N * dim] slice.
     /// If N < nlist, returns InvalidConfig.
+    /// For cosine metric, vectors are normalised before k-means so
+    /// centroid assignment is angular (same as FAISS's IVFFlat+cosine).
     pub fn train(self: *IndexIVFFlat, training: []const f32) !void {
         if (training.len % self.dim != 0) return Error.DimensionMismatch;
         const N: u32 = @intCast(training.len / self.dim);
         if (N < self.config.nlist) return Error.InvalidConfig;
+
+        // For cosine: build a normalised copy of the training set so
+        // centroid init and k-means assignment operate on the unit sphere.
+        const train_data: []const f32 = blk: {
+            if (self.config.metric == .cosine) {
+                const buf = try self.allocator.dupe(f32, training);
+                var i: usize = 0;
+                while (i < N) : (i += 1) {
+                    normalizeInPlace(buf[i * self.dim ..][0..self.dim]);
+                }
+                break :blk buf;
+            }
+            break :blk training;
+        };
+        defer if (self.config.metric == .cosine) self.allocator.free(train_data);
 
         // Allocate centroids + inverted lists if not already done.
         if (self.centroids.items.len == 0) {
@@ -184,9 +242,6 @@ pub const IndexIVFFlat = struct {
         // --- Centroid init: sample nlist distinct training vectors. ---
         var prng: std.Random.DefaultPrng = .init(self.config.seed);
         const rng = prng.random();
-        // Reservoir-style: pick first nlist, then random-replace.
-        // Simpler: pick nlist random indices in [0, N) with collision
-        // resampling. nlist is typically small relative to N.
         var picked = try self.allocator.alloc(bool, N);
         defer self.allocator.free(picked);
         @memset(picked, false);
@@ -197,19 +252,14 @@ pub const IndexIVFFlat = struct {
             while (picked[idx] and tries < 32) : (tries += 1) {
                 idx = rng.intRangeLessThan(u32, 0, N);
             }
-            // If we keep colliding (degenerate small-N case), advance
-            // linearly to the next un-picked slot.
             if (picked[idx]) {
                 var j: u32 = 0;
                 while (j < N) : (j += 1) {
-                    if (!picked[j]) {
-                        idx = j;
-                        break;
-                    }
+                    if (!picked[j]) { idx = j; break; }
                 }
             }
             picked[idx] = true;
-            const src = training[idx * self.dim ..][0..self.dim];
+            const src = train_data[idx * self.dim ..][0..self.dim];
             @memcpy(self.centroidAtMut(ci), src);
         }
 
@@ -223,43 +273,34 @@ pub const IndexIVFFlat = struct {
 
         var iter: u32 = 0;
         while (iter < self.config.n_iter) : (iter += 1) {
-            // Assign each training vector to its nearest centroid.
             var i: u32 = 0;
             while (i < N) : (i += 1) {
-                const v = training[i * self.dim ..][0..self.dim];
+                const v = train_data[i * self.dim ..][0..self.dim];
                 var best_c: u32 = 0;
                 var best_d: f32 = std.math.floatMax(f32);
                 var c: u32 = 0;
                 while (c < self.config.nlist) : (c += 1) {
-                    const d = l2sq(self.centroidAt(c), v);
-                    if (d < best_d) {
-                        best_d = d;
-                        best_c = c;
-                    }
+                    const d = self.dist(self.centroidAt(c), v);
+                    if (d < best_d) { best_d = d; best_c = c; }
                 }
                 assigns[i] = best_c;
             }
 
-            // Recompute centroids as the mean of their assigned vectors.
             @memset(counts, 0);
             @memset(sums, 0.0);
-            i = 0;
-            while (i < N) : (i += 1) {
-                const c = assigns[i];
+            var j: u32 = 0;
+            while (j < N) : (j += 1) {
+                const c = assigns[j];
                 counts[c] += 1;
-                const v = training[i * self.dim ..][0..self.dim];
+                const v = train_data[j * self.dim ..][0..self.dim];
                 const dst = sums[@as(usize, c) * self.dim ..][0..self.dim];
                 for (v, dst) |x, *d| d.* += x;
             }
             var c: u32 = 0;
             while (c < self.config.nlist) : (c += 1) {
                 if (counts[c] == 0) {
-                    // Empty cluster: reinit from a random training
-                    // vector. Standard FAISS strategy is to split the
-                    // largest cluster; we use the simpler reseed which
-                    // is also correctness-preserving.
                     const idx = rng.intRangeLessThan(u32, 0, N);
-                    const src = training[idx * self.dim ..][0..self.dim];
+                    const src = train_data[idx * self.dim ..][0..self.dim];
                     @memcpy(self.centroidAtMut(c), src);
                     continue;
                 }
@@ -267,6 +308,8 @@ pub const IndexIVFFlat = struct {
                 const src = sums[@as(usize, c) * self.dim ..][0..self.dim];
                 const dst = self.centroidAtMut(c);
                 for (src, dst) |s, *d| d.* = s * inv;
+                // For cosine: keep centroids on the unit sphere.
+                if (self.config.metric == .cosine) normalizeInPlace(dst);
             }
         }
 
@@ -279,12 +322,22 @@ pub const IndexIVFFlat = struct {
         if (vector.len != self.dim) return Error.DimensionMismatch;
 
         const node_idx: u32 = @intCast(self.ids.items.len);
-        try self.vectors.appendSlice(self.allocator, vector);
-        try self.ids.append(self.allocator, id);
 
-        const c = self.nearestCentroid(vector);
-        try self.assignments.append(self.allocator, c);
-        try self.inverted_lists.items[c].append(self.allocator, node_idx);
+        if (self.config.metric == .cosine) {
+            const norm_vec = try normalizedCopy(self.allocator, vector);
+            defer self.allocator.free(norm_vec);
+            try self.vectors.appendSlice(self.allocator, norm_vec);
+            const c = self.nearestCentroid(norm_vec);
+            try self.ids.append(self.allocator, id);
+            try self.assignments.append(self.allocator, c);
+            try self.inverted_lists.items[c].append(self.allocator, node_idx);
+        } else {
+            try self.vectors.appendSlice(self.allocator, vector);
+            try self.ids.append(self.allocator, id);
+            const c = self.nearestCentroid(vector);
+            try self.assignments.append(self.allocator, c);
+            try self.inverted_lists.items[c].append(self.allocator, node_idx);
+        }
 
         if (id >= self.next_id) self.next_id = id + 1;
         return id;
@@ -309,19 +362,26 @@ pub const IndexIVFFlat = struct {
         if (!self.trained) return Error.NotTrained;
         if (self.ids.items.len == 0) return Error.EmptyIndex;
 
+        // For cosine: normalise query so dist() == -IP on unit sphere.
+        var norm_query_buf: ?[]f32 = null;
+        defer if (norm_query_buf) |b| alloc.free(b);
+        const q: []const f32 = if (self.config.metric == .cosine) blk: {
+            const buf = try normalizedCopy(alloc, query);
+            norm_query_buf = buf;
+            break :blk buf;
+        } else query;
+
         // --- Rank centroids by distance to query, pick nprobe nearest ---
         const centroid_dists = try alloc.alloc(Candidate, self.config.nlist);
         defer alloc.free(centroid_dists);
         var c: u32 = 0;
         while (c < self.config.nlist) : (c += 1) {
-            centroid_dists[c] = .{ .dist = l2sq(self.centroidAt(c), query), .id = c };
+            centroid_dists[c] = .{ .dist = self.dist(self.centroidAt(c), q), .id = c };
         }
         std.sort.pdq(Candidate, centroid_dists, {}, candidateLess);
         const nprobe = @min(self.config.nprobe, self.config.nlist);
 
-        // --- Scan probed lists, collect (dist, id) pairs ---
-        // Upper-bound capacity = sum of probed list lengths; we just
-        // collect everything then partial-sort to k.
+        // --- Scan probed lists, collect (internal-dist, node-id) pairs ---
         var hits: std.ArrayList(Hit) = .empty;
         defer hits.deinit(alloc);
 
@@ -331,19 +391,16 @@ pub const IndexIVFFlat = struct {
             const list = self.inverted_lists.items[list_c].items;
             for (list) |node_idx| {
                 const v = self.vectorAt(node_idx);
-                const d = l2sq(v, query);
+                const d = self.dist(v, q);
                 try hits.append(alloc, .{ .id = self.ids.items[node_idx], .score = d });
             }
         }
 
         if (hits.items.len == 0) {
-            // All probed lists empty. Return empty slice (not EmptyIndex,
-            // because the index has vectors — just none in the probed
-            // lists). Callers can raise nprobe to fix recall.
             return try alloc.alloc(Hit, 0);
         }
 
-        // Sort ascending by distance, truncate to k.
+        // Sort ascending by internal distance, truncate to k.
         std.sort.pdq(Hit, hits.items, {}, struct {
             fn lt(_: void, a: Hit, b: Hit) bool {
                 return a.score < b.score;
@@ -351,7 +408,16 @@ pub const IndexIVFFlat = struct {
         }.lt);
         const out_n: usize = @min(k, hits.items.len);
         const out = try alloc.alloc(Hit, out_n);
-        @memcpy(out, hits.items[0..out_n]);
+        for (hits.items[0..out_n], 0..) |h, i| {
+            // Convert internal dist to caller score:
+            //   l2_squared: score = dist         (lower = nearer)
+            //   ip/cosine:  score = -dist = +sim (higher = more similar)
+            const score: f32 = switch (self.config.metric) {
+                .l2_squared => h.score,
+                .inner_product, .cosine => -h.score,
+            };
+            out[i] = .{ .id = h.id, .score = score };
+        }
         return out;
     }
 
@@ -554,7 +620,6 @@ test "IVF: dimension mismatch on train + add + search" {
 }
 
 test "IVF: recall vs FlatIndex on N=200 D=32 top-10" {
-    const root = @import("root.zig");
     const N = 200;
     const D = 32;
 
@@ -651,4 +716,60 @@ test "IVF: searchBatch matches single-thread search" {
             try testing.expectApproxEqAbs(a.score, b.score, 1e-6);
         }
     }
+}
+
+test "IVFFlat: inner-product metric ranks by descending IP" {
+    // Three vectors all in the [1,0,0,0] direction, different magnitudes.
+    // ip(v,q) = magnitude * 10. v0 wins.
+    const D: u32 = 4;
+    var idx = try IndexIVFFlat.init(testing.allocator, D, .{
+        .nlist = 1, .nprobe = 1, .metric = .inner_product,
+    });
+    defer idx.deinit();
+
+    const training = [_]f32{
+        3, 0, 0, 0,
+        2, 0, 0, 0,
+        1, 0, 0, 0,
+    };
+    try idx.train(&training);
+    _ = try idx.add(&[_]f32{ 3, 0, 0, 0 });
+    _ = try idx.add(&[_]f32{ 2, 0, 0, 0 });
+    _ = try idx.add(&[_]f32{ 1, 0, 0, 0 });
+
+    const q = [_]f32{ 10, 0, 0, 0 };
+    const hits = try idx.search(testing.allocator, &q, 3);
+    defer testing.allocator.free(hits);
+
+    try testing.expectEqual(@as(usize, 3), hits.len);
+    try testing.expectEqual(@as(u32, 0), hits[0].id);
+    try testing.expectApproxEqAbs(@as(f32, 30.0), hits[0].score, 1e-3);
+}
+
+test "IVFFlat: cosine metric ranks by angle, score = cosθ" {
+    const D: u32 = 4;
+    var idx = try IndexIVFFlat.init(testing.allocator, D, .{
+        .nlist = 1, .nprobe = 1, .metric = .cosine,
+    });
+    defer idx.deinit();
+
+    const training = [_]f32{
+        2, 0, 0, 0,
+        5, 0, 0, 0,
+        0, 1, 0, 0,
+    };
+    try idx.train(&training);
+    _ = try idx.add(&[_]f32{ 2, 0, 0, 0 }); // id 0: cosθ = 1 vs q
+    _ = try idx.add(&[_]f32{ 5, 0, 0, 0 }); // id 1: cosθ = 1 vs q
+    _ = try idx.add(&[_]f32{ 0, 1, 0, 0 }); // id 2: cosθ = 0 vs q
+
+    const q = [_]f32{ 1, 0, 0, 0 };
+    const hits = try idx.search(testing.allocator, &q, 3);
+    defer testing.allocator.free(hits);
+
+    try testing.expectEqual(@as(usize, 3), hits.len);
+    // ids 0 and 1 should rank above id 2
+    try testing.expect(hits[0].id == 0 or hits[0].id == 1);
+    try testing.expect(hits[0].score > 0.99);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), hits[2].score, 1e-4);
 }
