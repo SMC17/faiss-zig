@@ -25,8 +25,8 @@
 //!     by code byte. Pure table-lookup + add, no per-vector multiply —
 //!     this is what FAISS calls Asymmetric Distance Computation (ADC).
 //!
-//! v0.7 scope:
-//!   - L2-squared metric only (cosine + inner-product in v0.7.1+)
+//! v0.8 scope:
+//!   - L2-squared, inner-product, and cosine metrics
 //!   - Lloyd k-means init (not k-means++; v0.8 quality bump)
 //!   - 10 iterations default for both coarse + PQ k-means (FAISS uses
 //!     25; recall delta is small at our scales)
