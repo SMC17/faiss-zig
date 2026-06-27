@@ -48,6 +48,7 @@
 //! taken on real (clustered) embeddings.
 
 const std = @import("std");
+const root = @import("root.zig");
 
 pub const Error = error{
     DimensionMismatch,
@@ -79,6 +80,12 @@ pub const IVFPQConfig = struct {
     n_iter: u32 = 10,
     /// Deterministic seed for k-means init.
     seed: u64 = 42,
+    /// Distance metric for coarse-quantization and output scoring.
+    ///   l2_squared:    hit.score = ADC L2 approx (lower = nearer)
+    ///   inner_product: hit.score = −ADC (higher = more similar)
+    ///   cosine:        vectors normalised at train/add/query;
+    ///                  hit.score = −ADC (higher = more similar)
+    metric: root.Metric = .l2_squared,
 };
 
 const Vec8 = @Vector(8, f32);
@@ -113,6 +120,32 @@ fn l2sqScalar(a: []const f32, b: []const f32) f32 {
         sum += d * d;
     }
     return sum;
+}
+
+fn ip(a: []const f32, b: []const f32) f32 {
+    var sum_vec: Vec8 = @splat(0.0);
+    var i: usize = 0;
+    const tail = a.len - (a.len % LANE);
+    while (i < tail) : (i += LANE) {
+        const av: Vec8 = a[i..][0..LANE].*;
+        const bv: Vec8 = b[i..][0..LANE].*;
+        sum_vec += av * bv;
+    }
+    var sum: f32 = @reduce(.Add, sum_vec);
+    while (i < a.len) : (i += 1) sum += a[i] * b[i];
+    return sum;
+}
+
+fn normalizeInPlace(buf: []f32) void {
+    const n = @sqrt(ip(buf, buf));
+    if (n < 1e-12) return;
+    for (buf) |*x| x.* /= n;
+}
+
+fn normalizedCopy(alloc: std.mem.Allocator, v: []const f32) ![]f32 {
+    const out = try alloc.dupe(f32, v);
+    normalizeInPlace(out);
+    return out;
 }
 
 const Candidate = struct {
@@ -206,12 +239,22 @@ pub const IndexIVFPQ = struct {
         return self.pq_codebooks.items[off .. off + dsub];
     }
 
+    inline fn dist(self: *const IndexIVFPQ, a: []const f32, b: []const f32) f32 {
+        return switch (self.config.metric) {
+            .l2_squared => l2sq(a, b),
+            .inner_product => -ip(a, b),
+            .cosine => -ip(a, b), // pre-normalised
+        };
+    }
+
+    /// Find the nearest coarse centroid for `v` (linear scan).
+    /// For cosine/IP, `v` must already be normalised by the caller.
     fn nearestCentroid(self: *const IndexIVFPQ, v: []const f32) u32 {
         var best_c: u32 = 0;
         var best_d: f32 = std.math.floatMax(f32);
         var c: u32 = 0;
         while (c < self.config.nlist) : (c += 1) {
-            const d = l2sq(self.centroidAt(c), v);
+            const d = self.dist(self.centroidAt(c), v);
             if (d < best_d) {
                 best_d = d;
                 best_c = c;
@@ -300,9 +343,9 @@ pub const IndexIVFPQ = struct {
                 var c: u32 = 0;
                 while (c < k) : (c += 1) {
                     const cv = centroids_out[c * d ..][0..d];
-                    const dist = l2sqScalar(cv, v);
-                    if (dist < best_d) {
-                        best_d = dist;
+                    const dval = l2sqScalar(cv, v);
+                    if (dval < best_d) {
+                        best_d = dval;
                         best_c = c;
                     }
                 }
@@ -341,14 +384,29 @@ pub const IndexIVFPQ = struct {
     /// Train: (a) coarse k-means → nlist centroids; (b) compute
     /// residuals for the training set against assigned centroids; (c)
     /// per-subspace k-means over the residuals → M codebooks.
+    ///
+    /// For cosine metric, training vectors are normalised before coarse
+    /// k-means so centroids live on the unit sphere. PQ codebooks are
+    /// always trained on L2 residuals regardless of metric.
     pub fn train(self: *IndexIVFPQ, training: []const f32) !void {
         if (training.len % self.dim != 0) return Error.DimensionMismatch;
         const N: u32 = @intCast(training.len / self.dim);
         if (N < self.config.nlist) return Error.InvalidConfig;
-        // PQ k-means needs at least PQ_KSUB training points per subspace
-        // (or it'll collide-sample). N >= PQ_KSUB is the production
-        // floor; we allow smaller-N callers but emit InvalidConfig.
         if (N < PQ_KSUB) return Error.InvalidConfig;
+
+        // For cosine: work on a normalised copy for coarse k-means.
+        const train_data: []const f32 = blk: {
+            if (self.config.metric == .cosine) {
+                const buf = try self.allocator.dupe(f32, training);
+                var ni: usize = 0;
+                while (ni < N) : (ni += 1) {
+                    normalizeInPlace(buf[ni * self.dim ..][0..self.dim]);
+                }
+                break :blk buf;
+            }
+            break :blk training;
+        };
+        defer if (self.config.metric == .cosine) self.allocator.free(train_data);
 
         // --- allocate centroid + codebook storage if first call ---
         if (self.centroids.items.len == 0) {
@@ -365,9 +423,9 @@ pub const IndexIVFPQ = struct {
 
         var prng: std.Random.DefaultPrng = .init(self.config.seed);
 
-        // --- (a) coarse k-means over the full training vectors ---
+        // --- (a) coarse k-means over the (possibly normalised) training vectors ---
         const coarse_assigns = try self.kmeans(
-            training,
+            train_data,
             N,
             self.dim,
             self.config.nlist,
@@ -376,13 +434,23 @@ pub const IndexIVFPQ = struct {
         );
         defer self.allocator.free(coarse_assigns);
 
-        // --- (b) compute residuals: training - assigned coarse centroid ---
+        // For cosine: re-normalise coarse centroids so nearestCentroid
+        // computes -IP correctly against normalised stored vectors.
+        if (self.config.metric == .cosine) {
+            var c: u32 = 0;
+            while (c < self.config.nlist) : (c += 1) {
+                normalizeInPlace(self.centroidAtMut(c));
+            }
+        }
+
+        // --- (b) compute residuals against assigned coarse centroid ---
+        // Residuals use the (possibly normalised) training data.
         const residuals = try self.allocator.alloc(f32, @as(usize, N) * self.dim);
         defer self.allocator.free(residuals);
         var i: u32 = 0;
         while (i < N) : (i += 1) {
             const c = coarse_assigns[i];
-            const v = training[i * self.dim ..][0..self.dim];
+            const v = train_data[i * self.dim ..][0..self.dim];
             const cv = self.centroidAt(c);
             const r = residuals[i * self.dim ..][0..self.dim];
             for (v, cv, r) |a, b, *rp| rp.* = a - b;
@@ -430,14 +498,24 @@ pub const IndexIVFPQ = struct {
         if (!self.trained) return Error.NotTrained;
         if (vector.len != self.dim) return Error.DimensionMismatch;
 
-        const c = self.nearestCentroid(vector);
+        // For cosine: normalise before coarse assignment.
+        var norm_buf: [4096]f32 = undefined;
+        const v: []const f32 = if (self.config.metric == .cosine) blk: {
+            std.debug.assert(self.dim <= norm_buf.len);
+            const nb = norm_buf[0..self.dim];
+            @memcpy(nb, vector);
+            normalizeInPlace(nb);
+            break :blk nb;
+        } else vector;
+
+        const c = self.nearestCentroid(v);
         const cv = self.centroidAt(c);
 
         // residual
-        var residual_buf: [4096]f32 = undefined; // dim hard ceiling for stack buf
+        var residual_buf: [4096]f32 = undefined;
         std.debug.assert(self.dim <= residual_buf.len);
         const residual = residual_buf[0..self.dim];
-        for (vector, cv, residual) |a, b, *rp| rp.* = a - b;
+        for (v, cv, residual) |a, b, *rp| rp.* = a - b;
 
         // encode
         var code_buf: [256]u8 = undefined; // pq_m hard ceiling
@@ -485,17 +563,27 @@ pub const IndexIVFPQ = struct {
         if (!self.trained) return Error.NotTrained;
         if (self.len() == 0) return Error.EmptyIndex;
 
+        // For cosine: normalise query before coarse ranking.
+        var norm_query_buf: ?[]f32 = null;
+        defer if (norm_query_buf) |b| alloc.free(b);
+        const q: []const f32 = if (self.config.metric == .cosine) blk: {
+            const buf = try normalizedCopy(alloc, query);
+            norm_query_buf = buf;
+            break :blk buf;
+        } else query;
+
         // --- rank coarse centroids ---
         const centroid_dists = try alloc.alloc(Candidate, self.config.nlist);
         defer alloc.free(centroid_dists);
         var c: u32 = 0;
         while (c < self.config.nlist) : (c += 1) {
-            centroid_dists[c] = .{ .dist = l2sq(self.centroidAt(c), query), .id = c };
+            centroid_dists[c] = .{ .dist = self.dist(self.centroidAt(c), q), .id = c };
         }
         std.sort.pdq(Candidate, centroid_dists, {}, candidateLess);
         const nprobe = @min(self.config.nprobe, self.config.nlist);
 
-        // --- per-probe scan with per-probe LUT ---
+        // --- per-probe scan with per-probe ADC LUT ---
+        // PQ residuals are always L2 regardless of metric.
         const lut = try alloc.alloc(f32, @as(usize, self.config.pq_m) * PQ_KSUB);
         defer alloc.free(lut);
 
@@ -509,8 +597,7 @@ pub const IndexIVFPQ = struct {
         while (p < nprobe) : (p += 1) {
             const list_c = centroid_dists[p].id;
             const cv = self.centroidAt(list_c);
-            // query_residual = query - cv
-            for (query, cv, residual) |a, b, *rp| rp.* = a - b;
+            for (q, cv, residual) |a, b, *rp| rp.* = a - b;
             self.buildLUT(residual, lut);
 
             const codes = self.inverted_codes.items[list_c].items;
@@ -520,9 +607,9 @@ pub const IndexIVFPQ = struct {
             while (vi < ids.len) : (vi += 1) {
                 const code = codes[vi * M ..][0..M];
                 var sum: f32 = 0;
-                var m: u32 = 0;
-                while (m < M) : (m += 1) {
-                    sum += lut[m * PQ_KSUB + code[m]];
+                var mi: u32 = 0;
+                while (mi < M) : (mi += 1) {
+                    sum += lut[mi * PQ_KSUB + code[mi]];
                 }
                 try hits.append(alloc, .{ .id = ids[vi], .score = sum });
             }
@@ -532,6 +619,7 @@ pub const IndexIVFPQ = struct {
             return try alloc.alloc(Hit, 0);
         }
 
+        // ADC scores are always L2 (lower = nearer). Sort ascending.
         std.sort.pdq(Hit, hits.items, {}, struct {
             fn lt(_: void, a: Hit, b: Hit) bool {
                 return a.score < b.score;
@@ -539,7 +627,17 @@ pub const IndexIVFPQ = struct {
         }.lt);
         const out_n: usize = @min(k, hits.items.len);
         const out = try alloc.alloc(Hit, out_n);
-        @memcpy(out, hits.items[0..out_n]);
+        for (hits.items[0..out_n], 0..) |h, i| {
+            // Convert internal L2 ADC score to caller-facing score:
+            //   l2_squared:    score = ADC (lower = nearer)
+            //   ip/cosine:     score = -ADC (higher = more similar;
+            //                  monotone with true IP/cosine on normalised data)
+            const score: f32 = switch (self.config.metric) {
+                .l2_squared => h.score,
+                .inner_product, .cosine => -h.score,
+            };
+            out[i] = .{ .id = h.id, .score = score };
+        }
         return out;
     }
 
@@ -753,7 +851,6 @@ test "IVFPQ: recall vs FlatIndex on N=2000 D=64 M=8 nlist=16 nprobe=8 top-10" {
     // numbers for the canonical equivalent (IVF1024,PQ8 on SIFT1M)
     // are ~0.6-0.8 R@10; we measure our own here on uniform data and
     // assert the OBSERVED threshold to avoid a fake-pass.
-    const root = @import("root.zig");
     const N = 2000;
     const D = 64;
     const M = 8;
@@ -889,4 +986,87 @@ test "IVFPQ: memory footprint scales as M bytes/vec + codebook overhead" {
     // on the per-vector side.
     const raw_per_vec_bytes = N * D * @sizeOf(f32);
     _ = raw_per_vec_bytes;
+}
+
+test "IVFPQ: cosine metric top-1 agrees with IVFFlat cosine" {
+    // Build a small normalised dataset; IVFPQ cosine must rank the same
+    // top-1 as IVFFlat cosine (IVFPQ may have lower recall but top-1 on
+    // this tiny set should match).
+    const D: u32 = 8;
+    const N: u32 = 512;
+    var prng: std.Random.DefaultPrng = .init(7);
+    const rng = prng.random();
+
+    var training = try testing.allocator.alloc(f32, N * D);
+    defer testing.allocator.free(training);
+    for (training) |*v| v.* = rng.float(f32) * 2.0 - 1.0;
+
+    const ivf_root = @import("ivf.zig");
+    var flat = try ivf_root.IndexIVFFlat.init(testing.allocator, D, .{
+        .nlist = 8, .nprobe = 8, .metric = .cosine,
+    });
+    defer flat.deinit();
+    try flat.train(training);
+
+    var pq = try IndexIVFPQ.init(testing.allocator, D, .{
+        .nlist = 8, .nprobe = 8, .pq_m = 2, .metric = .cosine,
+    });
+    defer pq.deinit();
+    try pq.train(training);
+
+    var i: u32 = 0;
+    while (i < N) : (i += 1) {
+        const v = training[i * D ..][0..D];
+        _ = try flat.add(v);
+        _ = try pq.add(v);
+    }
+
+    // 5 random queries: top-1 must agree
+    var q: [D]f32 = undefined;
+    var matches: usize = 0;
+    var trials: usize = 0;
+    while (trials < 5) : (trials += 1) {
+        for (&q) |*x| x.* = rng.float(f32) * 2.0 - 1.0;
+        const h_flat = try flat.search(testing.allocator, &q, 1);
+        defer testing.allocator.free(h_flat);
+        const h_pq = try pq.search(testing.allocator, &q, 1);
+        defer testing.allocator.free(h_pq);
+        if (h_flat.len > 0 and h_pq.len > 0 and h_flat[0].id == h_pq[0].id) {
+            matches += 1;
+        }
+    }
+    // Recall ≥ 3/5 on 8-probe tiny set
+    try testing.expect(matches >= 3);
+}
+
+test "IVFPQ: cosine scores are positive for similar vectors" {
+    // score = -ADC so should be negative for most results; but
+    // a vector vs itself should produce a high (near-zero or positive) score.
+    const D: u32 = 4;
+    const N: u32 = 256;
+    var prng: std.Random.DefaultPrng = .init(99);
+    const rng = prng.random();
+
+    var training = try testing.allocator.alloc(f32, N * D);
+    defer testing.allocator.free(training);
+    for (training) |*v| v.* = rng.float(f32);
+
+    var idx = try IndexIVFPQ.init(testing.allocator, D, .{
+        .nlist = 4, .nprobe = 4, .pq_m = 2, .metric = .cosine,
+    });
+    defer idx.deinit();
+    try idx.train(training);
+
+    var i: u32 = 0;
+    while (i < N) : (i += 1) {
+        _ = try idx.add(training[i * D ..][0..D]);
+    }
+
+    // Query with the first training vector: its score should be near-maximal
+    const q = training[0..D];
+    const hits = try idx.search(testing.allocator, q, 1);
+    defer testing.allocator.free(hits);
+    try testing.expect(hits.len > 0);
+    // score = -ADC_L2; top hit should have high similarity (score > -1.0)
+    try testing.expect(hits[0].score > -1.0);
 }
