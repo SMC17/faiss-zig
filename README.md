@@ -171,7 +171,7 @@ AGPL-3.0-or-later. See `LICENSE`.
 
 ```
 nix develop        # Zig 0.16.0 + jq + curl + gawk + python3(websockets)
-zig build test     # 44/44 expected
+zig build test     # 76/76 expected
 ```
 
 The repo's `flake.nix` pins exact dep versions (see `STATUS.md`).
