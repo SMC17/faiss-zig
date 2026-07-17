@@ -11,3 +11,6 @@ __pycache__/
 .direnv/
 result
 result-*
+
+deps/*
+!deps/.gitkeep
