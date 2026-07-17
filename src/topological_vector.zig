@@ -1,9 +1,9 @@
 //! Topological Vector Substrate (Zig 0.16.0)
-//! 
+//!
 //! DOCTRINE: Phase Omega (Topological Invariants over Cartesian Geometry)
 //!
 //! This substrate integrates qsr-zig persistent homology into the vector search
-//! path. It uses Betti numbers (structural voids/connectedness) as primary 
+//! path. It uses Betti numbers (structural voids/connectedness) as primary
 //! search features to enable non-Euclidean search.
 
 const std = @import("std");
@@ -14,7 +14,7 @@ pub const TopologicalHash = packed struct {
     b1: u21,
     b2: u21,
     _pad: u1 = 0,
-    
+
     /// Single-cycle structural distance using XOR and population count.
     pub fn fastDistance(a: TopologicalHash, b: TopologicalHash) f32 {
         // Non-human bit-metric: count total bit-difference across all homology dimensions
@@ -31,10 +31,10 @@ pub fn extractFeatures(alloc: std.mem.Allocator, vector: []const f32, epsilon: f
     _ = epsilon;
     var complex = qsr.SimplicialComplex.init(alloc);
     defer complex.deinit();
-    
+
     // Pass raw pointer to enable Fused Fetch-Reduce
     const betti = try complex.extractBettiNumbers(vector.ptr);
-    
+
     return TopologicalFeature{
         .b0 = @intCast(betti.b0),
         .b1 = @intCast(betti.b1),
@@ -51,7 +51,7 @@ pub fn topologicalSearch(
 ) !void {
     // 1. Extract query topology
     const query_feat = try extractFeatures(alloc, query_vector, 0.5);
-    
+
     // 2. Filter database by topological similarity
     // This renders the agent immune to coordinate-space noise.
     _ = query_feat;

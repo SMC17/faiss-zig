@@ -22,14 +22,14 @@ pub fn main(p: std.process.Init) !void {
 
         // 2. Command Dispatch (Simple demo for Phase Omega activation)
         const cmd = payload[0];
-        
+
         switch (cmd) {
             1 => { // Ping
                 try sendResponse(stdout, io, "PONG");
             },
             else => {
                 try sendResponse(stdout, io, "UNKNOWN_COMMAND");
-            }
+            },
         }
     }
 }

@@ -59,7 +59,9 @@ const MaxHeap = struct {
     items: [K]Hit,
     count: usize,
 
-    fn init() MaxHeap { return .{ .items = undefined, .count = 0 }; }
+    fn init() MaxHeap {
+        return .{ .items = undefined, .count = 0 };
+    }
 
     fn pushDown(self: *MaxHeap, idx: usize) void {
         var i = idx;
@@ -131,7 +133,7 @@ fn searchTopK4Row(
             }
         }
         const scores = l2_4rows(query, &vectors[i], &vectors[i + 1], &vectors[i + 2], &vectors[i + 3]);
-        heap.push(.{ .id = ids[i],     .score = scores[0] });
+        heap.push(.{ .id = ids[i], .score = scores[0] });
         heap.push(.{ .id = ids[i + 1], .score = scores[1] });
         heap.push(.{ .id = ids[i + 2], .score = scores[2] });
         heap.push(.{ .id = ids[i + 3], .score = scores[3] });

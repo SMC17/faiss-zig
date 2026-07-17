@@ -76,7 +76,10 @@ pub fn main(init: std.process.Init) !void {
             defer alloc.free(hnsw_hits);
             var matches: usize = 0;
             for (hnsw_hits) |h| {
-                for (gt[qi]) |g| if (h.id == g) { matches += 1; break; };
+                for (gt[qi]) |g| if (h.id == g) {
+                    matches += 1;
+                    break;
+                };
             }
             total_recall += @as(f32, @floatFromInt(matches)) / @as(f32, @floatFromInt(K));
         }
