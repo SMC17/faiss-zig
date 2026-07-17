@@ -1,5 +1,5 @@
 //! Morphogenetic HNSW Search Substrate (Zig 0.16.0)
-//! 
+//!
 //! DOCTRINE: Substrate First (Zero-Alloc, Zero-Copy, Cache-Locality)
 //!
 //! This substrate implements a zero-allocation search path for HNSW
@@ -54,11 +54,11 @@ pub fn searchLayerMorphogenetic(
     while (ws.popCandidate()) |c| {
         // results_heap logic (simplified for this Phase Omega preview)
         // ... (heap-tracking logic identical to original but using ws.results_heap)
-        
+
         // Mock neighbor traversal to show zero-alloc path
-        const neighbors = if (level == 0 and self.csr_edges != null) 
+        const neighbors = if (level == 0 and self.csr_edges != null)
             self.level0Edges(c.id)
-        else 
+        else
             self.connections.items[c.id].items[level].items;
 
         for (neighbors) |n| {
@@ -66,7 +66,7 @@ pub fn searchLayerMorphogenetic(
             const bit_mask: u8 = @as(u8, 1) << @intCast(n % 8);
             if ((visited[byte_idx] & bit_mask) != 0) continue;
             visited[byte_idx] |= bit_mask;
-            
+
             const d = l2sq(self.vectors.items[n * self.dim ..][0..self.dim], query);
             ws.pushCandidate(.{ .dist = d, .id = n });
         }

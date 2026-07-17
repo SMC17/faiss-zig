@@ -510,9 +510,9 @@ test "FlatIndex.l2 — dimension mismatch on search" {
 test "FlatIndex.inner_product — sorted descending" {
     var idx = FlatIndex.init(testing.allocator, 2, .inner_product);
     defer idx.deinit();
-    _ = try idx.add(&[_]f32{ 1, 0 });    // dot with (1,0) = 1
-    _ = try idx.add(&[_]f32{ 0, 1 });    // dot with (1,0) = 0
-    _ = try idx.add(&[_]f32{ -1, 0 });   // dot with (1,0) = -1
+    _ = try idx.add(&[_]f32{ 1, 0 }); // dot with (1,0) = 1
+    _ = try idx.add(&[_]f32{ 0, 1 }); // dot with (1,0) = 0
+    _ = try idx.add(&[_]f32{ -1, 0 }); // dot with (1,0) = -1
     _ = try idx.add(&[_]f32{ 0.5, 0.5 }); // dot with (1,0) = 0.5
 
     const query = [_]f32{ 1, 0 };
@@ -527,10 +527,10 @@ test "FlatIndex.inner_product — sorted descending" {
 test "FlatIndex.cosine — sorted descending, normalised" {
     var idx = FlatIndex.init(testing.allocator, 2, .cosine);
     defer idx.deinit();
-    _ = try idx.add(&[_]f32{ 1, 0 });   // cos with (1,0) = 1
-    _ = try idx.add(&[_]f32{ 2, 0 });   // cos with (1,0) = 1 (same direction)
-    _ = try idx.add(&[_]f32{ 0, 1 });   // cos with (1,0) = 0
-    _ = try idx.add(&[_]f32{ -1, 0 });  // cos with (1,0) = -1
+    _ = try idx.add(&[_]f32{ 1, 0 }); // cos with (1,0) = 1
+    _ = try idx.add(&[_]f32{ 2, 0 }); // cos with (1,0) = 1 (same direction)
+    _ = try idx.add(&[_]f32{ 0, 1 }); // cos with (1,0) = 0
+    _ = try idx.add(&[_]f32{ -1, 0 }); // cos with (1,0) = -1
 
     const query = [_]f32{ 1, 0 };
     const hits = try idx.search(testing.allocator, &query, 4);

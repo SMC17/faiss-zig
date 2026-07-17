@@ -1003,13 +1003,18 @@ test "IVFPQ: cosine metric top-1 agrees with IVFFlat cosine" {
 
     const ivf_root = @import("ivf.zig");
     var flat = try ivf_root.IndexIVFFlat.init(testing.allocator, D, .{
-        .nlist = 8, .nprobe = 8, .metric = .cosine,
+        .nlist = 8,
+        .nprobe = 8,
+        .metric = .cosine,
     });
     defer flat.deinit();
     try flat.train(training);
 
     var pq = try IndexIVFPQ.init(testing.allocator, D, .{
-        .nlist = 8, .nprobe = 8, .pq_m = 2, .metric = .cosine,
+        .nlist = 8,
+        .nprobe = 8,
+        .pq_m = 2,
+        .metric = .cosine,
     });
     defer pq.deinit();
     try pq.train(training);
@@ -1052,7 +1057,10 @@ test "IVFPQ: cosine scores are positive for similar vectors" {
     for (training) |*v| v.* = rng.float(f32);
 
     var idx = try IndexIVFPQ.init(testing.allocator, D, .{
-        .nlist = 4, .nprobe = 4, .pq_m = 2, .metric = .cosine,
+        .nlist = 4,
+        .nprobe = 4,
+        .pq_m = 2,
+        .metric = .cosine,
     });
     defer idx.deinit();
     try idx.train(training);

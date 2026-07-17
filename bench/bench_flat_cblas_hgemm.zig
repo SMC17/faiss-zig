@@ -163,7 +163,9 @@ const MaxHeap = struct {
     items: [K]Hit,
     count: usize,
 
-    fn init() MaxHeap { return .{ .items = undefined, .count = 0 }; }
+    fn init() MaxHeap {
+        return .{ .items = undefined, .count = 0 };
+    }
 
     fn pushDown(self: *MaxHeap, idx: usize) void {
         var i = idx;

@@ -41,9 +41,15 @@ const MaxHeap = struct {
         return .{ .items = undefined, .count = 0 };
     }
 
-    fn parent(i: usize) usize { return (i - 1) / 2; }
-    fn left(i: usize) usize { return 2 * i + 1; }
-    fn right(i: usize) usize { return 2 * i + 2; }
+    fn parent(i: usize) usize {
+        return (i - 1) / 2;
+    }
+    fn left(i: usize) usize {
+        return 2 * i + 1;
+    }
+    fn right(i: usize) usize {
+        return 2 * i + 2;
+    }
 
     fn pushUp(self: *MaxHeap, idx: usize) void {
         var i = idx;

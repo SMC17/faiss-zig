@@ -36,7 +36,7 @@ pub fn main(p: std.process.Init) !void {
         for (&v) |*val| val.* = rng.float(f32);
         _ = try idx.add(&v);
     }
-    
+
     // Finalize triggers Topological Hash calculation
     std.debug.print("Finalizing Index (Pre-calculating Topo Hashes)...\n", .{});
     try idx.finalize();

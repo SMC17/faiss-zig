@@ -1,5 +1,5 @@
 //! Morphogenetic IVF Search Substrate (Zig 0.16.0)
-//! 
+//!
 //! DOCTRINE: Substrate First (Zero-Alloc, Zero-Copy, Cache-Locality)
 //!
 //! This substrate implements a zero-allocation IVF search path utilizing
@@ -39,7 +39,7 @@ pub fn searchIVFMorphogenetic(
     ws: *morph.SearchWorkspace,
 ) ![]ivf_mod.Hit {
     ws.reset();
-    
+
     // 1. Rank centroids (Zero-Alloc)
     // We use ws.candidates_heap to store centroid distances temporarily.
     const nlist = self.config.nlist;
@@ -50,18 +50,18 @@ pub fn searchIVFMorphogenetic(
     }
 
     const nprobe = @min(self.config.nprobe, nlist);
-    
+
     // 2. Scan probed lists
     var p: u32 = 0;
     while (p < nprobe) : (p += 1) {
         const best_centroid = ws.popCandidate() orelse break;
         const list_c = best_centroid.id;
         const list = self.inverted_lists.items[list_c].items;
-        
+
         for (list) |node_idx| {
             const v = self.vectors.items[node_idx * self.dim ..][0..self.dim];
             const d = l2sq(v, query);
-            
+
             // results_heap is a max-heap, keeping the top-k nearest.
             // If d is smaller than the farthest hit in the heap, we replace it.
             if (ws.results_count < k) {
@@ -74,7 +74,7 @@ pub fn searchIVFMorphogenetic(
     }
 
     // 3. Extract hits (Non-Allocating view into Workspace)
-    // The caller must copy these if they want to own them, 
+    // The caller must copy these if they want to own them,
     // but the hot-path forward pass uses them as transient data.
     const out_n = ws.results_count;
     const out = try ws.allocator.alloc(ivf_mod.Hit, out_n); // Final output alloc only

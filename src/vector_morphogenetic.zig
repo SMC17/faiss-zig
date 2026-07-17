@@ -1,5 +1,5 @@
 //! Morphogenetic Vector Substrate (Zig 0.16.0)
-//! 
+//!
 //! DOCTRINE: Substrate First (Zero-Alloc, Zero-Copy, Cache-Locality)
 //!
 //! This substrate implements a zero-allocation vector search path for HNSW
@@ -12,18 +12,18 @@ const std = @import("std");
 /// containing all state required for a single-thread vector search.
 pub const SearchWorkspace = struct {
     allocator: std.mem.Allocator,
-    
+
     /// Bitset to track visited nodes during graph traversal (HNSW).
     /// bitset[node_id / 8] & (1 << (node_id % 8))
     visited: []u8,
-    
+
     /// Distance buffer for intermediate calculations.
     distances: []f32,
-    
+
     /// Fixed-capacity min-heap for candidates.
     candidates_heap: []Candidate,
     candidates_count: usize,
-    
+
     /// Fixed-capacity max-heap for top-k results.
     results_heap: []Candidate,
     results_count: usize,
@@ -38,7 +38,7 @@ pub const SearchWorkspace = struct {
         errdefer alloc.destroy(self);
 
         const bitset_bytes = (max_nodes + 7) / 8;
-        
+
         self.* = .{
             .allocator = alloc,
             .visited = try alloc.alloc(u8, bitset_bytes),
@@ -48,7 +48,7 @@ pub const SearchWorkspace = struct {
             .results_heap = try alloc.alloc(Candidate, ef_search),
             .results_count = 0,
         };
-        
+
         @memset(self.visited, 0);
         return self;
     }
@@ -120,7 +120,7 @@ pub const AdjacencySlab = struct {
     offsets: []usize,
     /// Number of neighbors per (node, level): [max_nodes * max_level]
     counts: []u8,
-    
+
     max_nodes: usize,
     max_level: u8,
     M: u8,
@@ -128,7 +128,7 @@ pub const AdjacencySlab = struct {
     pub fn init(alloc: std.mem.Allocator, max_nodes: usize, max_level: u8, M: u8) !AdjacencySlab {
         const total_slots = max_nodes * @as(usize, max_level + 1) * M;
         const total_meta = max_nodes * @as(usize, max_level + 1);
-        
+
         return .{
             .allocator = alloc,
             .edges = try alloc.alloc(u32, total_slots),
@@ -145,7 +145,7 @@ pub const AdjacencySlab = struct {
         self.allocator.free(self.offsets);
         self.allocator.free(self.counts);
     }
-    
+
     pub inline fn getNeighbors(self: AdjacencySlab, node_id: u32, level: u8) []const u32 {
         const idx = node_id * @as(usize, self.max_level + 1) + level;
         const offset = idx * self.M;

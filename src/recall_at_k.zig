@@ -116,7 +116,7 @@ test "recallAtK is order-invariant" {
 }
 
 test "recallAtK rejects length mismatch" {
-    const t = [_]Hit{ .{ .id = 1, .score = 0.0 } };
+    const t = [_]Hit{.{ .id = 1, .score = 0.0 }};
     const e = [_]Hit{ .{ .id = 1, .score = 0.0 }, .{ .id = 2, .score = 0.0 } };
     try testing.expectError(Error.LengthMismatch, recallAtK(&t, &e));
 }

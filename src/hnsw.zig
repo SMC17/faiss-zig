@@ -222,7 +222,7 @@ pub const IndexHNSW = struct {
         if (self.topo_hashes) |s| self.allocator.free(s);
         const hashes = try self.allocator.alloc(topo.TopologicalFeature, n);
         errdefer self.allocator.free(hashes);
-        
+
         for (0..n) |i| {
             const v = self.vectors.items[i * self.dim .. (i + 1) * self.dim];
             hashes[i] = try topo.extractFeatures(self.allocator, v, 0.5);

@@ -1,5 +1,5 @@
 //! Morphogenetic Hybrid HNSW Search (Zig 0.16.0)
-//! 
+//!
 //! DOCTRINE: Phase Omega (Hybrid Structural-Euclidean Search)
 //!
 //! This substrate implements a hybrid search path where topological invariants
@@ -40,10 +40,10 @@ fn hybridDistance(
     target_topo: topo.TopologicalFeature,
 ) f32 {
     const d_topo = query_topo.fastDistance(target_topo);
-    
+
     // Truth Filter: Discard structural mismatches (Threshold=4 bits)
     if (d_topo > 4.0) return std.math.floatMax(f32);
-    
+
     // Refine with Euclidean
     return l2sq(query_vec, target_vec);
 }
@@ -105,9 +105,9 @@ pub fn searchLayerHybrid(
     while (ws.popCandidate()) |c| {
         if (c.dist == std.math.floatMax(f32)) continue; // Early discard
 
-        const neighbors = if (level == 0 and self.csr_edges != null) 
+        const neighbors = if (level == 0 and self.csr_edges != null)
             self.level0Edges(c.id)
-        else 
+        else
             self.connections.items[c.id].items[level].items;
 
         for (neighbors) |n| {
@@ -115,7 +115,7 @@ pub fn searchLayerHybrid(
             const bit_mask: u8 = @as(u8, 1) << @intCast(n % 8);
             if ((visited[byte_idx] & bit_mask) != 0) continue;
             visited[byte_idx] |= bit_mask;
-            
+
             const d = hybridDistance(query, query_topo, self.vectors.items[n * self.dim ..][0..self.dim], hashes[n]);
             ws.pushCandidate(.{ .dist = d, .id = n });
         }
@@ -131,7 +131,7 @@ pub fn searchHybrid(
     ws: *morph.SearchWorkspace,
 ) !void {
     if (self.entry_point < 0) return;
-    
+
     const ep_idx: usize = @intCast(self.entry_point);
     const start_dist = hybridDistance(query, query_topo, self.vectors.items[ep_idx * self.dim ..][0..self.dim], self.topo_hashes.?[ep_idx]);
     var cur = SearchResult{ .id = @as(u32, @intCast(self.entry_point)), .dist = start_dist };

@@ -59,13 +59,20 @@ const Pool = struct {
                 last_round = r;
                 const w = self.work[idx];
                 cblas_sgemm(
-                    101, 111, 112,
-                    Q, @intCast(w.n_slice), D,
+                    101,
+                    111,
+                    112,
+                    Q,
+                    @intCast(w.n_slice),
+                    D,
                     -2.0,
-                    w.queries_ptr, D,
-                    w.b_ptr, D,
+                    w.queries_ptr,
+                    D,
+                    w.b_ptr,
+                    D,
                     0.0,
-                    w.dots_ptr, @intCast(w.n_slice),
+                    w.dots_ptr,
+                    @intCast(w.n_slice),
                 );
                 _ = self.done.fetchAdd(1, .release);
             } else {
@@ -217,7 +224,9 @@ const MaxHeap = struct {
     items: [K]Hit,
     count: usize,
 
-    fn init() MaxHeap { return .{ .items = undefined, .count = 0 }; }
+    fn init() MaxHeap {
+        return .{ .items = undefined, .count = 0 };
+    }
 
     fn pushDown(self: *MaxHeap, idx: usize) void {
         var i = idx;

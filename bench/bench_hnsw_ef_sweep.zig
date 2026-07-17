@@ -59,7 +59,9 @@ pub fn main(init: std.process.Init) !void {
             defer h_set.deinit();
             for (hnsw_hits) |h| try h_set.put(h.id, {});
             var matches: usize = 0;
-            for (flat_hits) |h| if (h_set.contains(h.id)) { matches += 1; };
+            for (flat_hits) |h| if (h_set.contains(h.id)) {
+                matches += 1;
+            };
             total_recall += @as(f32, @floatFromInt(matches)) / @as(f32, @floatFromInt(K));
         }
         const total_ns: u64 = @intCast(qs.durationTo(std.Io.Clock.awake.now(io)).nanoseconds);
