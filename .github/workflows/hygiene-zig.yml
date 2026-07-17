@@ -1,5 +1,8 @@
-# Consumer of SMC17/stax-hygiene reusable Zig test.
-name: Hygiene Zig (reusable)
+# Hygiene gate for faiss-zig.
+# Default `zig build` installs examples that path-depend on qsr-zig (not always
+# present in a clean clone). Gate on fmt + unit tests only until qsr is wired
+# like vllm deps/ multi-checkout.
+name: Hygiene Zig
 
 on:
   push:
@@ -10,8 +13,15 @@ on:
 
 jobs:
   zig-test:
-    uses: SMC17/stax-hygiene/.github/workflows/reusable-zig-test.yml@main
-    with:
-      zig-version: '0.16.0'
-      test-args: '--summary all'
-      fmt-paths: 'src build.zig'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: '0.16.0'
+      - name: zig version
+        run: zig version
+      - name: zig fmt --check
+        run: zig fmt --check src build.zig
+      - name: zig build test
+        run: zig build test --summary all
