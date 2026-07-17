@@ -255,7 +255,10 @@ pub const IndexIVFFlat = struct {
             if (picked[idx]) {
                 var j: u32 = 0;
                 while (j < N) : (j += 1) {
-                    if (!picked[j]) { idx = j; break; }
+                    if (!picked[j]) {
+                        idx = j;
+                        break;
+                    }
                 }
             }
             picked[idx] = true;
@@ -281,7 +284,10 @@ pub const IndexIVFFlat = struct {
                 var c: u32 = 0;
                 while (c < self.config.nlist) : (c += 1) {
                     const d = self.dist(self.centroidAt(c), v);
-                    if (d < best_d) { best_d = d; best_c = c; }
+                    if (d < best_d) {
+                        best_d = d;
+                        best_c = c;
+                    }
                 }
                 assigns[i] = best_c;
             }
@@ -535,8 +541,8 @@ test "IVF: train + single add + find itself" {
 
     // 4 training vectors → 2 clusters
     const training = [_]f32{
-        0, 0, 0, 0,
-        0, 0, 0, 1,
+        0,  0,  0,  0,
+        0,  0,  0,  1,
         10, 10, 10, 10,
         10, 10, 10, 11,
     };
@@ -723,7 +729,9 @@ test "IVFFlat: inner-product metric ranks by descending IP" {
     // ip(v,q) = magnitude * 10. v0 wins.
     const D: u32 = 4;
     var idx = try IndexIVFFlat.init(testing.allocator, D, .{
-        .nlist = 1, .nprobe = 1, .metric = .inner_product,
+        .nlist = 1,
+        .nprobe = 1,
+        .metric = .inner_product,
     });
     defer idx.deinit();
 
@@ -749,7 +757,9 @@ test "IVFFlat: inner-product metric ranks by descending IP" {
 test "IVFFlat: cosine metric ranks by angle, score = cosθ" {
     const D: u32 = 4;
     var idx = try IndexIVFFlat.init(testing.allocator, D, .{
-        .nlist = 1, .nprobe = 1, .metric = .cosine,
+        .nlist = 1,
+        .nprobe = 1,
+        .metric = .cosine,
     });
     defer idx.deinit();
 

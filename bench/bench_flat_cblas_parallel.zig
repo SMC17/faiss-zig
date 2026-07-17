@@ -47,13 +47,20 @@ const ThreadArgs = struct {
 
 fn workerSgemm(args: *ThreadArgs) void {
     cblas_sgemm(
-        101, 111, 112,
-        Q, @intCast(args.n_slice), D,
+        101,
+        111,
+        112,
+        Q,
+        @intCast(args.n_slice),
+        D,
         -2.0,
-        args.queries.ptr, D,
-        args.b_slice.ptr, D,
+        args.queries.ptr,
+        D,
+        args.b_slice.ptr,
+        D,
         0.0,
-        args.out_dots.ptr, @intCast(args.n_slice),
+        args.out_dots.ptr,
+        @intCast(args.n_slice),
     );
 }
 
@@ -177,7 +184,9 @@ const MaxHeap = struct {
     items: [K]Hit,
     count: usize,
 
-    fn init() MaxHeap { return .{ .items = undefined, .count = 0 }; }
+    fn init() MaxHeap {
+        return .{ .items = undefined, .count = 0 };
+    }
 
     fn pushDown(self: *MaxHeap, idx: usize) void {
         var i = idx;
