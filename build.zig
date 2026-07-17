@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const qsr_mod = b.createModule(.{
-        .root_source_file = b.path("../qsr-zig/src/root.zig"),
+        .root_source_file = b.path("deps/qsr-zig/src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
