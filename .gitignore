@@ -12,5 +12,7 @@ __pycache__/
 result
 result-*
 
+# Path-dep: deps/qsr-zig is a local symlink or checkout (not vendored).
+# See CLEAN_CLONE.md and scripts/check-clean-clone.sh.
 deps/*
 !deps/.gitkeep
