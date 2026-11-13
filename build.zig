@@ -12,29 +12,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const qsr_mod = b.createModule(.{
-        .root_source_file = b.path("deps/qsr-zig/src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    mod.addImport("qsr", qsr_mod);
-
     const tests = b.addTest(.{
         .root_module = mod,
     });
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
-
-    const port_exe = b.addExecutable(.{
-        .name = "faiss-port",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/port.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    b.installArtifact(port_exe);
 
     // Search CLI: search <vectors.bin> <query.bin> --k 10
     const search_mod = b.createModule(.{
@@ -132,74 +115,6 @@ pub fn build(b: *std.Build) void {
     run_bench_ivf.has_side_effects = true;
     const bench_ivf_step = b.step("bench-ivf", "IVFFlat bench at N=10000 D=128 nlist=100 nprobe=10");
     bench_ivf_step.dependOn(&run_bench_ivf.step);
-
-    // ------------------------------------------------------------------
-    // bench-vector-morphogenetic -- Zero-Alloc vs Legacy head-to-head
-    // ------------------------------------------------------------------
-    const bench_vm_mod = b.createModule(.{
-        .root_source_file = b.path("bench/bench_vector_morphogenetic.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    bench_vm_mod.addImport("faiss", mod);
-    const bench_vm_exe = b.addExecutable(.{
-        .name = "bench-vector-morphogenetic",
-        .root_module = bench_vm_mod,
-    });
-    const run_bench_vm = b.addRunArtifact(bench_vm_exe);
-    const bench_vm_step = b.step("bench-vector-morphogenetic", "Morphogenetic vs Legacy vector search comparative benchmark");
-    bench_vm_step.dependOn(&run_bench_vm.step);
-
-    // ------------------------------------------------------------------
-    // bench-hybrid-qps -- Standard HNSW vs Phase Omega Hybrid
-    // ------------------------------------------------------------------
-    const bench_hq_mod = b.createModule(.{
-        .root_source_file = b.path("bench/bench_hybrid_qps.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    bench_hq_mod.addImport("faiss", mod);
-    const bench_hq_exe = b.addExecutable(.{
-        .name = "bench-hybrid-qps",
-        .root_module = bench_hq_mod,
-    });
-    const run_bench_hq = b.addRunArtifact(bench_hq_exe);
-    const bench_hq_step = b.step("bench-hybrid-qps", "Standard HNSW vs Phase Omega Hybrid QPS benchmark");
-    bench_hq_step.dependOn(&run_bench_hq.step);
-
-    // ------------------------------------------------------------------
-    // bench-fused-qps -- Standard HNSW vs Phase Omega Fused
-    // ------------------------------------------------------------------
-    const bench_fq_mod = b.createModule(.{
-        .root_source_file = b.path("bench/bench_fused_qps.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    bench_fq_mod.addImport("faiss", mod);
-    const bench_fq_exe = b.addExecutable(.{
-        .name = "bench-fused-qps",
-        .root_module = bench_fq_mod,
-    });
-    const run_bench_fq = b.addRunArtifact(bench_fq_exe);
-    const bench_fq_step = b.step("bench-fused-qps", "Standard HNSW vs Phase Omega Fused QPS benchmark");
-    bench_fq_step.dependOn(&run_bench_fq.step);
-
-    // ------------------------------------------------------------------
-    // bench-topological-hash -- Standard HNSW vs Hashed Hybrid
-    // ------------------------------------------------------------------
-    const bench_th_mod = b.createModule(.{
-        .root_source_file = b.path("bench/bench_topological_hash.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    bench_th_mod.addImport("faiss", mod);
-    const bench_th_exe = b.addExecutable(.{
-        .name = "bench-topological-hash",
-        .root_module = bench_th_mod,
-    });
-    const run_bench_th = b.addRunArtifact(bench_th_exe);
-    const bench_th_step = b.step("bench-topological-hash", "Standard HNSW vs Hashed Hybrid QPS benchmark");
-    bench_th_step.dependOn(&run_bench_th.step);
 
     // IVFPQ bench. ReleaseFast for production timing.
     const bench_ivf_pq_mod = b.createModule(.{

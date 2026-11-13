@@ -1,4 +1,3 @@
-# Same gate as CI (qsr path dep). Prefer primary CI once CROSS_REPO_PAT is set.
 name: Hygiene Zig
 
 on:
@@ -13,13 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout qsr-zig into deps/
-        uses: actions/checkout@v4
-        with:
-          repository: SMC17/qsr-zig
-          path: deps/qsr-zig
-          fetch-depth: 1
-          token: ${{ secrets.CROSS_REPO_PAT || github.token }}
       - uses: mlugg/setup-zig@v2
         with:
           version: '0.16.0'
