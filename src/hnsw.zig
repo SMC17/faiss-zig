@@ -211,7 +211,6 @@ pub const IndexHNSW = struct {
         if (self.csr_edges) |s| self.allocator.free(s);
         self.csr_offsets = offsets;
         self.csr_edges = edges;
-
     }
 
     pub inline fn level0Edges(self: *const IndexHNSW, node_id: u32) []const u32 {
