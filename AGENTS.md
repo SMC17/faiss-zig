@@ -40,6 +40,3 @@ zig build bench
 Ask before release claims, changing recall thresholds used as gates, or
 publishing external benchmark comparisons.
 
-## Hygiene
-
-Org templates: `SMC17/stax-hygiene` (topic target: `stax-hygiene-managed`).

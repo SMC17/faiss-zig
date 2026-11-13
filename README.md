@@ -14,7 +14,6 @@ single-binary, libc-only.
 
 **v0.7 — four index families: Flat + HNSW + IVFFlat + IVFPQ.**
 
-Write-up: [Quantized Vector Similarity Search (PDF)](recall_audit.pdf). Its numbers predate the current commit.
 
 | Index family | Module          | Default config             | Headline @ N=10K D=128                                    |
 |--------------|-----------------|----------------------------|-----------------------------------------------------------|
@@ -174,6 +173,4 @@ nix develop        # Zig 0.16.0 + jq + curl + gawk + python3(websockets)
 zig build test     # 76/76 expected
 ```
 
-The repo's `flake.nix` pins exact dep versions (see `STATUS.md`).
-`scripts/checkpoint.sh` + `.githooks/post-commit` auto-regenerate
-`NEXT.md` after every commit (opt-in: `git config core.hooksPath .githooks`).
+The repo's `flake.nix` pins exact dependency versions for `nix develop`.
