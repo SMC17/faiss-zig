@@ -16,3 +16,4 @@ result-*
 # See CLEAN_CLONE.md and scripts/check-clean-clone.sh.
 deps/*
 !deps/.gitkeep
+*.aux
