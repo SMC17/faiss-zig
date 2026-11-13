@@ -1,7 +1,5 @@
 # faiss-zig
 
-**`tier-1 reproducible substrate`** · `flake.nix` · `scripts/checkpoint.sh` · `.githooks/post-commit`
-
 [![CI](https://github.com/SMC17/faiss-zig/actions/workflows/ci.yml/badge.svg)](https://github.com/SMC17/faiss-zig/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/SMC17/faiss-zig?sort=semver)](https://github.com/SMC17/faiss-zig/releases)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
@@ -14,7 +12,7 @@ single-binary, libc-only.
 
 **v0.7 — four index families: Flat + HNSW + IVFFlat + IVFPQ.**
 
-**Formal Audit:** [Quantized Vector Similarity Search: Memory Compression and SIMD Acceleration (PDF)](recall_audit.pdf)
+Write-up: [Quantized Vector Similarity Search (PDF)](recall_audit.pdf). Its numbers predate the current commit.
 
 | Index family | Module          | Default config             | Headline @ N=10K D=128                                    |
 |--------------|-----------------|----------------------------|-----------------------------------------------------------|
@@ -23,7 +21,7 @@ single-binary, libc-only.
 | IVFFlat      | `IndexIVFFlat`  | nlist=100, nprobe=10       | 208 µs/q, 4,801 q/s, **12.6x vs Flat**                    |
 | IVFPQ        | `IndexIVFPQ`    | nlist=100, nprobe=10, M=8  | 522 µs/q, 1,915 q/s, **5.06x vs Flat, 16.94x mem-compression** |
 
-End-to-head head-to-head against `faiss-cpu` (Python wrapper of
+Historical, not remeasured on the current commit. Head-to-head against `faiss-cpu` (Python wrapper of
 `facebookresearch/faiss`) on N=10000, D=128, K=10, Q=100, L2:
 
 | Implementation                                    | ns/query | queries/sec | vs faiss-cpu  |

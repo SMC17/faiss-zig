@@ -1,6 +1,3 @@
-# Clean-clone CI: private qsr-zig checked out into deps/.
-# Set repository secret CROSS_REPO_PAT with contents:read on SMC17/qsr-zig
-# (default GITHUB_TOKEN cannot read other private repos).
 name: CI
 
 on:
@@ -18,13 +15,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Checkout qsr-zig into deps/
-        uses: actions/checkout@v4
-        with:
-          repository: SMC17/qsr-zig
-          path: deps/qsr-zig
-          fetch-depth: 1
-          token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
       - uses: mlugg/setup-zig@v2
         with:
