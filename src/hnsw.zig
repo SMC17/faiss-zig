@@ -27,10 +27,7 @@
 //! Recall is configurable via ef_search: higher = better recall, slower.
 
 const std = @import("std");
-const topo = @import("topological_vector.zig");
-const morph = @import("vector_morphogenetic.zig");
 const root = @import("root.zig");
-const SearchWorkspace = morph.SearchWorkspace;
 
 pub const Error = error{
     DimensionMismatch,
@@ -145,8 +142,6 @@ pub const IndexHNSW = struct {
     ///   is the slice of level-0 neighbors for node i in csr_edges.
     csr_offsets: ?[]u32 = null,
     csr_edges: ?[]u32 = null,
-    /// Topological Hashes: pre-calculated Betti numbers.
-    topo_hashes: ?[]@import("topological_vector.zig").TopologicalFeature = null,
 
     /// Internal distance: always minimised. For IP/cosine, lower = more similar.
     /// Callers that need a similarity score should negate for IP/cosine metrics.
@@ -180,7 +175,6 @@ pub const IndexHNSW = struct {
         self.connections.deinit(self.allocator);
         if (self.csr_offsets) |s| self.allocator.free(s);
         if (self.csr_edges) |s| self.allocator.free(s);
-        if (self.topo_hashes) |s| self.allocator.free(s);
     }
 
     /// Materialize the level-0 adjacency into a CSR (Compressed Sparse Row)
@@ -218,16 +212,6 @@ pub const IndexHNSW = struct {
         self.csr_offsets = offsets;
         self.csr_edges = edges;
 
-        // Pre-calculate Topological Hashes (Phase Omega)
-        if (self.topo_hashes) |s| self.allocator.free(s);
-        const hashes = try self.allocator.alloc(topo.TopologicalFeature, n);
-        errdefer self.allocator.free(hashes);
-
-        for (0..n) |i| {
-            const v = self.vectors.items[i * self.dim .. (i + 1) * self.dim];
-            hashes[i] = try topo.extractFeatures(self.allocator, v, 0.5);
-        }
-        self.topo_hashes = hashes;
     }
 
     pub inline fn level0Edges(self: *const IndexHNSW, node_id: u32) []const u32 {
@@ -238,105 +222,6 @@ pub const IndexHNSW = struct {
             return self.csr_edges.?[start..end];
         }
         return self.connections.items[node_id].items[0].items;
-    }
-
-    /// Hybrid Structural-Euclidean Search (Phase Omega)
-    pub fn searchHybrid(
-        self: *const IndexHNSW,
-        query: []const f32,
-        query_topo: topo.TopologicalFeature,
-        k: usize,
-        ws: *SearchWorkspace,
-    ) !void {
-        if (self.entry_point < 0) return;
-
-        const ep_idx: usize = @intCast(self.entry_point);
-        const start_dist = self.hybridDistance(query, query_topo, self.vectorAt(@intCast(self.entry_point)), self.topo_hashes.?[ep_idx]);
-        var cur = Candidate{ .dist = start_dist, .id = @as(u32, @intCast(self.entry_point)) };
-
-        var l: i32 = @intCast(self.max_level);
-        while (l > 0) : (l -= 1) {
-            cur = try self.greedyDescendHybrid(query, query_topo, cur.id, cur.dist, @intCast(l));
-        }
-
-        try self.searchLayerHybrid(query, query_topo, cur.id, @intCast(l), ws);
-        _ = k;
-    }
-
-    fn hybridDistance(
-        self: *const IndexHNSW,
-        query_vec: []const f32,
-        query_topo: topo.TopologicalFeature,
-        target_vec: []const f32,
-        target_topo: topo.TopologicalFeature,
-    ) f32 {
-        const d_topo = query_topo.fastDistance(target_topo);
-        if (d_topo > 4.0) return std.math.floatMax(f32);
-        return self.dist(query_vec, target_vec);
-    }
-
-    fn greedyDescendHybrid(
-        self: *const IndexHNSW,
-        query: []const f32,
-        query_topo: topo.TopologicalFeature,
-        cur_id: u32,
-        cur_dist: f32,
-        level: u8,
-    ) !Candidate {
-        var best_id = cur_id;
-        var best_dist = cur_dist;
-        const hashes = self.topo_hashes.?;
-
-        while (true) {
-            var changed = false;
-            const neighbors = self.connections.items[best_id].items[level].items;
-            for (neighbors) |n| {
-                const d = self.hybridDistance(query, query_topo, self.vectorAt(n), hashes[n]);
-                if (d < best_dist) {
-                    best_dist = d;
-                    best_id = n;
-                    changed = true;
-                }
-            }
-            if (!changed) break;
-        }
-        return Candidate{ .id = best_id, .dist = best_dist };
-    }
-
-    fn searchLayerHybrid(
-        self: *const IndexHNSW,
-        query: []const f32,
-        query_topo: topo.TopologicalFeature,
-        entry_id: u32,
-        level: u8,
-        ws: *SearchWorkspace,
-    ) !void {
-        ws.reset();
-        const visited = ws.visited;
-        const hashes = self.topo_hashes.?;
-
-        const start_dist = self.hybridDistance(query, query_topo, self.vectorAt(entry_id), hashes[entry_id]);
-        ws.pushCandidate(.{ .dist = start_dist, .id = entry_id });
-        visited[entry_id / 8] |= @as(u8, 1) << @intCast(entry_id % 8);
-
-        while (ws.popCandidate()) |c| {
-            if (c.dist == std.math.floatMax(f32)) continue;
-
-            const neighbors: []const u32 = if (level == 0 and self.csr_edges != null)
-                self.level0Edges(c.id)
-            else
-                self.connections.items[c.id].items[level].items;
-
-            for (neighbors) |n| {
-                const byte_idx = n / 8;
-                const bit_mask: u8 = @as(u8, 1) << @intCast(n % 8);
-                if ((visited[byte_idx] & bit_mask) != 0) continue;
-                visited[byte_idx] |= bit_mask;
-
-                const d = self.hybridDistance(query, query_topo, self.vectorAt(n), hashes[n]);
-                ws.pushCandidate(.{ .dist = d, .id = n });
-            }
-        }
     }
 
     pub fn len(self: *const IndexHNSW) usize {
