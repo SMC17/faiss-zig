@@ -1,0 +1,14 @@
+# faiss-zig (`SMC17/faiss-zig`)
+
+> Vector similarity search in pure Zig 0.16: Flat, HNSW, IVFFlat and IVFPQ with L2, inner product and cosine.
+
+## Repository & Docs
+- **Repository**: https://github.com/SMC17/faiss-zig
+- [README](https://github.com/SMC17/faiss-zig/blob/main/README.md)
+- [AI Inference Zig Stack](https://sunlitmoon.online/lab/ai-inference-zig-stack.html)
+- [Build](https://github.com/SMC17/faiss-zig/blob/main/build.zig) & [Flake](https://github.com/SMC17/faiss-zig/blob/main/flake.nix)
+- [Source](https://github.com/SMC17/faiss-zig/tree/main/src) & [Benchmarks](https://github.com/SMC17/faiss-zig/tree/main/bench)
+
+## Ecosystem & Author
+- **Unified Substrate (`SMC17/zinging`)**: https://github.com/SMC17/zinging
+- **Author / Org**: https://github.com/SMC17
